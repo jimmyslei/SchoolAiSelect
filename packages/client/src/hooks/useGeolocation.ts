@@ -1,0 +1,128 @@
+import { useState, useCallback } from "react";
+import type { GeoLocation, GeoLocationStatus } from "@/types/school";
+import { getLocationByIp, reverseGeocodeCoords } from "@/lib/api";
+
+function isGeolocationPositionError(
+  error: unknown,
+): error is GeolocationPositionError {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    typeof (error as { code: unknown }).code === "number"
+  );
+}
+
+function getBrowserPosition(): Promise<GeolocationPosition> {
+  return new Promise((resolve, reject) => {
+    if (typeof navigator === "undefined" || !("geolocation" in navigator)) {
+      reject(new Error("当前浏览器不支持定位，请手动输入地址"));
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(resolve, reject, {
+      enableHighAccuracy: true,
+      timeout: 10000,
+      maximumAge: 0,
+    });
+  });
+}
+
+function getBrowserLocationError(error: GeolocationPositionError): string {
+  switch (error.code) {
+    case 1: // PERMISSION_DENIED
+      return "IP定位失败，且浏览器定位权限被拒绝，请手动输入地址";
+    case 2: // POSITION_UNAVAILABLE
+      return "IP定位失败，且浏览器暂时无法获取位置信息，请手动输入地址";
+    case 3: // TIMEOUT
+      return "IP定位失败，且浏览器定位超时，请手动输入地址";
+    default:
+      return "定位失败，请手动输入地址";
+  }
+}
+
+export function useGeolocation() {
+  const [location, setLocation] = useState<GeoLocation | null>(null);
+  const [status, setStatus] = useState<GeoLocationStatus>("idle");
+  const [error, setError] = useState<string | null>(null);
+
+  const requestLocation = useCallback(async () => {
+    setStatus("requesting");
+    setError(null);
+
+    // 1) 先调用后端 IP 定位接口
+    let ipErrorMessage: string | null = null;
+    try {
+      const geo = await getLocationByIp();
+      if (
+        Number.isFinite(geo.latitude) &&
+        Number.isFinite(geo.longitude) &&
+        geo.latitude !== 0 &&
+        geo.longitude !== 0
+      ) {
+        setLocation(geo);
+        setStatus("success");
+        return;
+      }
+      ipErrorMessage = "IP定位返回坐标无效";
+      console.warn(
+        "[useGeolocation] IP 定位返回坐标无效，回退到浏览器定位:",
+        geo,
+      );
+    } catch (ipError) {
+      ipErrorMessage =
+        ipError instanceof Error ? ipError.message : "IP定位失败";
+      console.warn(
+        "[useGeolocation] IP 定位接口失败，回退到浏览器定位:",
+        ipError,
+      );
+    }
+
+    // 2) IP 定位失败 → 使用浏览器 Geolocation API 获取经纬度
+    try {
+      const position = await getBrowserPosition();
+      const { latitude, longitude, accuracy } = position.coords;
+
+      let address = "当前位置";
+      try {
+        address = await reverseGeocodeCoords(latitude, longitude);
+      } catch (reverseError) {
+        console.warn(
+          "[useGeolocation] 逆地理编码失败，使用默认地址标签:",
+          reverseError,
+        );
+      }
+
+      setLocation({ latitude, longitude, address, accuracy });
+      setStatus("success");
+    } catch (browserError) {
+      console.warn("[useGeolocation] 浏览器定位失败:", browserError);
+
+      if (isGeolocationPositionError(browserError)) {
+        setStatus(browserError.code === 1 ? "denied" : "error");
+        setError(getBrowserLocationError(browserError));
+      } else {
+        setStatus("error");
+        setError(
+          browserError instanceof Error
+            ? `${ipErrorMessage ?? "IP定位失败"}；浏览器定位也失败：${browserError.message}`
+            : `${ipErrorMessage ?? "IP定位失败"}，请手动输入地址`,
+        );
+      }
+    }
+  }, []);
+
+  const setManualLocation = useCallback((geo: GeoLocation) => {
+    setLocation(geo);
+    setStatus("success");
+    setError(null);
+  }, []);
+
+  return {
+    location,
+    status,
+    error,
+    requestLocation,
+    setManualLocation,
+  };
+}

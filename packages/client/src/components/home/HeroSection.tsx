@@ -1,0 +1,185 @@
+import { motion } from "framer-motion";
+import {
+  ArrowRight,
+  Compass,
+  MapPin,
+  Sparkles,
+  Stars,
+  Trophy,
+} from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+interface HeroSectionProps {
+  onStart: () => void;
+}
+
+const metrics = [
+  { label: "分析维度", value: "7 项" },
+  { label: "数据来源", value: "多平台" },
+  { label: "决策方式", value: "AI + 公开信息" },
+];
+
+export function HeroSection({ onStart }: HeroSectionProps) {
+  return (
+    <section
+      id="top"
+      className="relative overflow-hidden px-4 pb-16 pt-28 sm:px-6 sm:pb-20 lg:px-8"
+    >
+      <div className="absolute inset-0 -z-10">
+        <div className="absolute inset-x-0 top-0 h-[560px] bg-linear-to-b from-peach-100/70 via-warm-50 to-transparent" />
+        <div className="absolute left-[-8%] top-24 h-72 w-72 rounded-full bg-peach-200/45 blur-3xl" />
+        <div className="absolute right-[-6%] top-16 h-80 w-80 rounded-full bg-gold-100/60 blur-3xl" />
+        <div className="absolute bottom-0 left-1/2 h-64 w-[70%] -translate-x-1/2 rounded-full bg-sand-200/35 blur-3xl" />
+      </div>
+
+      <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] lg:items-center">
+        <motion.div
+          initial={{ opacity: 0, y: 24 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, ease: "easeOut" }}
+          className="max-w-2xl"
+        >
+          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-warm-200/80 bg-background/80 px-4 py-2 text-xs font-medium text-warm-700 shadow-xs backdrop-blur-sm">
+            <Sparkles className="h-3.5 w-3.5" />
+            AI 驱动的暖感择校体验
+          </div>
+
+          <div className="space-y-6">
+            <div className="space-y-4">
+              <p className="text-sm font-medium uppercase tracking-[0.28em] text-warm-600">
+                Geo School Match
+              </p>
+              <h1 className="text-balance font-display text-4xl font-semibold leading-tight text-neutral-900 sm:text-5xl lg:text-6xl">
+                从家庭位置出发，
+                <span className="block bg-linear-to-r from-warm-600 via-peach-500 to-gold-400 bg-clip-text text-transparent">
+                  找到更适合孩子的学校。
+                </span>
+              </h1>
+              <p className="max-w-xl text-base leading-8 text-neutral-600 sm:text-lg">
+                自动定位、整合公开教育信息、生成多维评分与推荐理由，让择校流程更清晰、更安心，也更容易比较。
+              </p>
+            </div>
+
+            <div
+              id="hero-start"
+              className="flex flex-col gap-3 sm:flex-row sm:items-center"
+            >
+              <Button
+                onClick={onStart}
+                variant="warm"
+                size="xl"
+                className="group"
+              >
+                开始寻找学校
+                <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
+              </Button>
+              <a
+                href="#workflow"
+                className="inline-flex h-14 items-center justify-center rounded-full border border-border/80 bg-background/70 px-6 text-sm font-medium text-neutral-700 transition-colors hover:bg-accent hover:text-warm-700"
+              >
+                查看流程说明
+              </a>
+            </div>
+
+            <div className="grid gap-3 pt-4 sm:grid-cols-3">
+              {metrics.map((item) => (
+                <div
+                  key={item.label}
+                  className="rounded-[24px] border border-border/70 bg-background/70 px-4 py-4 backdrop-blur-sm"
+                >
+                  <div className="text-2xl font-semibold text-neutral-900">
+                    {item.value}
+                  </div>
+                  <div className="mt-1 text-xs text-neutral-500">
+                    {item.label}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </motion.div>
+
+        <motion.div
+          initial={{ opacity: 0, scale: 0.96, y: 24 }}
+          animate={{ opacity: 1, scale: 1, y: 0 }}
+          transition={{ duration: 0.8, delay: 0.1, ease: "easeOut" }}
+          className="relative"
+        >
+          <div className="surface-elevated warm-grid relative overflow-hidden rounded-[36px] p-5 sm:p-6">
+            <div className="absolute right-5 top-5 rounded-full bg-background/80 px-3 py-1 text-xs font-medium text-warm-700">
+              实时生成推荐结果
+            </div>
+
+            <div className="rounded-[28px] bg-[linear-gradient(180deg,rgba(255,248,241,0.96),rgba(255,252,247,0.92))] p-5 sm:p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-sm font-medium text-neutral-500">
+                    推荐概览
+                  </p>
+                  <h2 className="mt-2 font-display text-2xl font-semibold text-neutral-900">
+                    海淀区 · 小学推荐
+                  </h2>
+                </div>
+                <div className="rounded-2xl bg-warm-100 px-3 py-2 text-right">
+                  <div className="text-xs text-warm-700">综合评分</div>
+                  <div className="text-2xl font-semibold text-warm-700">92</div>
+                </div>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                <div className="rounded-[24px] border border-gold-200/70 bg-linear-to-r from-gold-50 to-peach-50 p-4">
+                  <div className="flex items-center gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-gold-300 text-white">
+                      <Trophy className="h-5 w-5" />
+                    </div>
+                    <div>
+                      <p className="text-xs font-medium uppercase tracking-[0.2em] text-gold-500">
+                        Top Pick
+                      </p>
+                      <h3 className="mt-1 text-lg font-semibold text-neutral-900">
+                        中关村第三小学
+                      </h3>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm leading-7 text-neutral-600">
+                    师资稳定、家长口碑突出、公开内容活跃，适合作为优先关注对象。
+                  </p>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="rounded-[24px] border border-border/70 bg-background/80 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+                      <MapPin className="h-4 w-4 text-warm-500" />
+                      距离与位置
+                    </div>
+                    <p className="mt-3 text-sm leading-7 text-neutral-600">
+                      自动定位家庭地址，优先展示通勤更友好的学校。
+                    </p>
+                  </div>
+                  <div className="rounded-[24px] border border-border/70 bg-background/80 p-4">
+                    <div className="flex items-center gap-2 text-sm font-medium text-neutral-700">
+                      <Compass className="h-4 w-4 text-warm-500" />
+                      多维分析
+                    </div>
+                    <p className="mt-3 text-sm leading-7 text-neutral-600">
+                      师资、口碑、活动、获奖与内容质量统一纳入评分。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <motion.div
+            animate={{ y: [0, -10, 0] }}
+            transition={{ duration: 6, repeat: Infinity, ease: "easeInOut" }}
+            className="absolute -left-3 top-10 hidden rounded-full border border-border/70 bg-background/85 px-4 py-2 text-xs font-medium text-neutral-700 shadow-sm backdrop-blur-sm sm:flex sm:items-center sm:gap-2"
+          >
+            <Stars className="h-3.5 w-3.5 text-gold-500" />
+            重点学校优先突出
+          </motion.div>
+        </motion.div>
+      </div>
+    </section>
+  );
+}
