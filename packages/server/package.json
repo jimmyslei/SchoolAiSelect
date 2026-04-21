@@ -1,0 +1,13 @@
+{
+  "name": "server",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "dotnet watch run --project SchoolRecommender.Api.csproj",
+    "build": "dotnet build SchoolRecommender.Api.csproj",
+    "start": "dotnet run --no-build --project SchoolRecommender.Api.csproj"
+  },
+  "dependencies": {
+    "cheerio": "^1.1.2"
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "SchoolRecommender.Api": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:4257;http://localhost:4259"
+    }
+  }
+}
