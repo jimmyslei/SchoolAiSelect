@@ -1,34 +1,37 @@
-using System.ClientModel;
-using System.ClientModel.Primitives;
-using System.Text.Json;
+using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI;
 using SchoolRecommender.Api.Models;
 using SchoolRecommender.Api.Options;
+using System.ClientModel;
+using System.ClientModel.Primitives;
+using System.Text;
+using System.Text.Json;
 
 namespace SchoolRecommender.Api.Services;
 
 /// <summary>
-/// 学校公开内容分析 Agent，分两个明确阶段执行：
-/// <list type="number">
-///   <item>调研阶段：通过 <see cref="LocalSkillScriptRunner"/> 并行调用本地技能脚本，
-///         分别传入学校名称参数搜索微信公众号与小红书内容。</item>
-///   <item>分析阶段：将采集结果连同学校基本信息一起发送给 AI，输出结构化评分 JSON。</item>
-/// </list>
+/// 学校公开内容分析 Agent。
+/// 通过 <see cref="AgentSkillsProvider"/> 从本地 skills 目录自动加载技能工具，
+/// 由 <see cref="ChatClientAgent"/> 托管完整的 tool-call 循环：AI 自主决定调用
+/// wechat-article-search / xiaohongshu-search 等技能采集公开内容，再输出结构化评分 JSON。
 /// </summary>
 public sealed class SchoolAnalysisAgent
 {
-    private readonly IChatClient _chatClient;
-    private readonly LocalSkillScriptRunner _skillRunner;
+    private readonly ChatClientAgent _agent;
     private readonly ILogger<SchoolAnalysisAgent> _logger;
 
     public SchoolAnalysisAgent(
         SchoolServiceOptions options,
-        LocalSkillScriptRunner skillRunner,
+        LocalSkillScriptRunner skillScriptRunner,
+        ILoggerFactory loggerFactory,
         ILogger<SchoolAnalysisAgent> logger)
     {
         if (string.IsNullOrWhiteSpace(options.DashScopeApiKey))
             throw new InvalidOperationException("未配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY，无法初始化分析 Agent");
+
+        if (!Directory.Exists(options.SkillRootPath))
+            throw new DirectoryNotFoundException($"未找到 skills 目录: {options.SkillRootPath}");
 
         var fixerHandler = new DashScopeResponseFixerHandler();
         var httpClient = new HttpClient(fixerHandler);
@@ -41,12 +44,46 @@ public sealed class SchoolAnalysisAgent
                 Transport = new HttpClientPipelineTransport(httpClient),
             });
 
+        // AgentSkillsProvider 从 skills 目录自动发现 SKILL.md，把技能说明注入系统提示，
+        // 但它生成的 run_skill_script 工具不带参数 schema —— 某些模型（DashScope/Qwen）
+        // 无法据此传入 query/keyword，导致"只加载 skill 却不执行脚本"。
+        // 因此我们保留 skillsProvider 做说明展示，但**额外把两个脚本包装成显式 AIFunction**，
+        // 带明确的参数 schema 让模型可靠传参。
+        var skillsProvider = new AgentSkillsProvider(
+            options.SkillRootPath,
+            skillScriptRunner.RunAsync,
+            loggerFactory: loggerFactory);
+
+        var searchWechatTool = AIFunctionFactory.Create(
+            (string query, int? num, CancellationToken ct)
+                => skillScriptRunner.SearchWechatArticlesAsync(query, num, ct),
+            name: "search_wechat_articles",
+            description: "搜索微信公众号文章。参数 query 为必填的搜索关键词（例如学校名称），可选 num 为返回条数（默认 10，最大 50）。返回 JSON 字符串，包含文章标题、链接、摘要、发布时间、来源公众号。");
+
+        var searchXiaohongshuTool = AIFunctionFactory.Create(
+            (string keyword, int? limit, CancellationToken ct)
+                => skillScriptRunner.SearchXiaohongshuNotesAsync(keyword, limit, ct),
+            name: "search_xiaohongshu_notes",
+            description: "搜索小红书（xiaohongshu/rednote）笔记。参数 keyword 为必填的搜索关键词（例如学校名称），可选 limit 为返回条数（默认 10）。返回 JSON 字符串，包含笔记 id、标题、作者、点赞/收藏/评论数。");
+
         // FunctionCallArgumentNormalizerChatClient 修复 DashScope/Qwen 将 function
         // arguments 序列化为数组而非对象的问题
-        _chatClient = new FunctionCallArgumentNormalizerChatClient(
-            openAiClient.GetChatClient(options.DashScopeModel).AsIChatClient());
+        _agent = new FunctionCallArgumentNormalizerChatClient(
+                openAiClient.GetChatClient(options.DashScopeModel).AsIChatClient())
+            .AsAIAgent(
+                new ChatClientAgentOptions
+                {
+                    Name = "SchoolResearchAnalyst",
+                    Description = "基于本地 skills 采集微信公众号与小红书公开内容，分析并输出学校评分 JSON。",
+                    ChatOptions = new ChatOptions
+                    {
+                        Instructions = SystemInstructions,
+                        Tools = [searchWechatTool, searchXiaohongshuTool, new HostedWebSearchTool()],
+                    },
+                    //AIContextProviders = [skillsProvider],
+                },
+                loggerFactory: loggerFactory);
 
-        _skillRunner = skillRunner;
         _logger = logger;
     }
 
@@ -54,72 +91,21 @@ public sealed class SchoolAnalysisAgent
 
     /// <summary>
     /// 分析单所学校的公开舆情内容，返回结构化评分结果。
+    /// Agent 自主决定调用哪些 skill、何时完成调研，最终输出 JSON。
     /// </summary>
     public async Task<SchoolAnalysis> AnalyzeAsync(School school, CancellationToken cancellationToken)
     {
-        // 第一阶段：并行调用本地技能脚本，采集公开内容
-        var research = await GatherResearchDataAsync(school, cancellationToken);
-
-        // 第二阶段：将采集结果交给 AI 分析，输出结构化 JSON
-        return await RunAnalysisAsync(school, research, cancellationToken);
-    }
-
-    // ─── 第一阶段：调研 ───────────────────────────────────────────────────────
-
-    /// <summary>
-    /// 并行执行微信公众号与小红书两个技能脚本，以学校名称为搜索参数采集公开内容。
-    /// 任一脚本失败时不抛出异常，由脚本运行器返回错误描述字符串，
-    /// 后续分析阶段会据此体现为"样本不足"。
-    /// </summary>
-    private async Task<SchoolResearchData> GatherResearchDataAsync(
-        School school,
-        CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("开始采集学校公开内容: {SchoolName}", school.Name);
-
-        // 以学校名称为 query/keyword 参数，并行调用两个 skill 脚本
-        var wechatTask = _skillRunner.RunWechatSearchAsync(
-            query: school.Name,
-            cancellationToken: cancellationToken);
-
-        var xiaohongshuTask = _skillRunner.RunXiaohongshuSearchAsync(
-            keyword: school.Name,
-            cancellationToken: cancellationToken);
-
-        await Task.WhenAll(wechatTask, xiaohongshuTask);
-
-        var wechatContent = await wechatTask;
-        var xiaohongshuContent = await xiaohongshuTask;
-
-        _logger.LogInformation(
-            "公开内容采集完成: {SchoolName} | 微信: {WechatChars} 字符, 小红书: {XhsChars} 字符",
-            school.Name, wechatContent.Length, xiaohongshuContent.Length);
-
-        return new SchoolResearchData(wechatContent, xiaohongshuContent);
-    }
-
-    // ─── 第二阶段：AI 分析 ────────────────────────────────────────────────────
-
-    /// <summary>
-    /// 将学校信息与已采集内容组装为分析提示，调用 AI 返回结构化 JSON 评分。
-    /// 解析失败时使用保守兜底结果。
-    /// </summary>
-    private async Task<SchoolAnalysis> RunAnalysisAsync(
-        School school,
-        SchoolResearchData research,
-        CancellationToken cancellationToken)
-    {
-        var messages = BuildAnalysisMessages(school, research);
+        var prompt = BuildPrompt(school);
 
         try
         {
-            var response = await _chatClient.GetResponseAsync(messages, options: null, cancellationToken: cancellationToken);
-            var raw = response.Messages.LastOrDefault()?.Text ?? string.Empty;
+            var response = await _agent.RunAsync(prompt, cancellationToken: cancellationToken);
+            var raw = response.Text;
 
-            _logger.LogInformation("AI 分析原始返回: {SchoolName} => {RawResponse}", school.Name, raw);
+            _logger.LogInformation("Agent 分析原始返回: {SchoolName} => {RawResponse}", school.Name, raw);
 
             var json = ExtractJson(raw)
-                ?? throw new InvalidOperationException("AI 未返回可解析的 JSON");
+                ?? throw new InvalidOperationException("Agent 未返回可解析的 JSON");
 
             return JsonSerializer.Deserialize<SchoolAnalysis>(json, JsonOptions)
                 ?? CreateFallbackAnalysis();
@@ -133,19 +119,8 @@ public sealed class SchoolAnalysisAgent
 
     // ─── 提示构建 ─────────────────────────────────────────────────────────────
 
-    private static IList<ChatMessage> BuildAnalysisMessages(School school, SchoolResearchData research) =>
-    [
-        new ChatMessage(ChatRole.System, SystemPrompt),
-        new ChatMessage(ChatRole.User, BuildUserPrompt(school, research)),
-    ];
-
-    private static string BuildUserPrompt(School school, SchoolResearchData research)
-    {
-        var wechatSection = FormatResearchSection(research.WechatContent);
-        var xhsSection = FormatResearchSection(research.XiaohongshuContent);
-
-        return $$"""
-请根据以下已采集的公开内容，对该学校进行保守、可解释的择校评分分析。
+    private static string BuildPrompt(School school) => $$"""
+请调研并分析下面这所学校的公开内容，给出保守且可解释的择校评分分析。
 
 【学校基本信息】
 名称：{{school.Name}}
@@ -153,11 +128,16 @@ public sealed class SchoolAnalysisAgent
 类型：{{SchoolTypes.DisplayName(school.Type)}}
 距用户位置：{{school.Distance}} 米
 
-【微信公众号搜索结果】
-{{wechatSection}}
+调研要求（必须先搜索再分析）：
+1. 调用 wechat-article-search skill搜索微信公众号文章，参数必须按 AIFunctionArguments 形式传入：new AIFunctionArguments { ["query"] = "{{school.Name}}" }。
+2. 调用 xiaohongshu-search skill搜索小红书内容，参数必须按 AIFunctionArguments 形式传入：new AIFunctionArguments { ["query"] = "{{school.Name}}" }。
+3. 若上述工具失败或无结果，可使用联网搜索工具补充。
+4. 两个平台都要尝试搜索"{{school.Name}}"；若结果稀少，在分数和总结中体现保守判断。
 
-【小红书搜索结果】
-{{xhsSection}}
+调用 skill 参数格式要求：
+- 必须传 AIFunctionArguments 风格的键值对参数对象，而不是 JSON 字符串、JSON 对象文本、数组、裸字符串
+- 正确示例：new AIFunctionArguments { ["query"] = "{{school.Name}}" }
+- 错误示例：{"query":"{{school.Name}}"}、["{{school.Name}}"]、"{{school.Name}}"
 
 评分要求：
 - 样本稀少时给保守低分（建议 30-50 区间），不要给虚高分
@@ -179,23 +159,10 @@ public sealed class SchoolAnalysisAgent
   "studentActivityScore": 0-100 的整数,
   "studentActivityDesc": "一句话",
   "sources": [
-    { "platform": "微信公众号或小红书", "accountName": "可选", "postCount": 整数, "lastPostDate": "可选", "url": "可选" }
+    { "platform": "微信公众号或小红书", "accountName": "可选", "postCount": 整数, "lastPostDate": "可选", "url": "来源地址" }
   ]
 }
 """;
-    }
-
-    /// <summary>
-    /// 将脚本输出内容格式化为提示节，空结果或错误结果显示为"无数据"提示。
-    /// </summary>
-    private static string FormatResearchSection(string content)
-    {
-        var hasContent = !string.IsNullOrWhiteSpace(content)
-            && !content.StartsWith("Error:", StringComparison.OrdinalIgnoreCase)
-            && content != "(no output)";
-
-        return hasContent ? content : "（无数据 — 评分请体现为样本不足）";
-    }
 
     // ─── 辅助方法 & 常量 ──────────────────────────────────────────────────────
 
@@ -232,14 +199,34 @@ public sealed class SchoolAnalysisAgent
         StudentActivityDesc: "学生活动公开信息较少。",
         Sources: []);
 
-    private const string SystemPrompt =
+    private const string SystemInstructions =
         """
-        你是一个专注于学校舆情的分析专家，基于已采集的公开内容进行保守、可解释的择校分析。
+        你是一个有着10年专业经验的择校分析师，可以根据学校的公开信息和舆情数据进行综合分析，提供专业且可解释的择校建议。
+        工作流程：先调用tool搜索学校公开信息，再根据搜索结果输出分析 JSON。
 
-        核心原则：
-        - 只根据提供的内容进行分析，不编造任何信息
-        - 数据不足时给出保守低分，并在总结字段中说明样本不足
-        - 只返回严格 JSON，不包含 Markdown 代码块或解释文字
+        可用 tool：
+        - search_wechat_articles(query, num?)：用于搜索微信公众号文章，query 必填，对应 wechat-article-search。
+        - search_xiaohongshu_notes(keyword, limit?)：用于搜索小红书内容，keyword 必填，对应 xiaohongshu-search。
+        - 联网搜索工具：补充使用。
+
+        你必须实际调用 tool，不要只描述计划。
+
+        强制执行步骤：
+        第一步：调用 wechat-article-search，按 AIFunctionArguments 形式传参：new AIFunctionArguments { ["query"] = "学校名称" }。
+        第二步：调用 xiaohongshu-search，按 AIFunctionArguments 形式传参：new AIFunctionArguments { ["query"] = "学校名称" }。
+        第三步：若结果不足，可使用联网搜索工具补充。
+        第四步：根据所有搜索结果输出严格 JSON 分析。
+
+        调用 skill 时参数必须是 AIFunctionArguments 形式，例如 new AIFunctionArguments { ["query"] = "北京四中" }。
+        不要传 JSON 字符串，不要传 JSON 对象文本，不要传数组，不要传裸字符串。
+        正确：new AIFunctionArguments { ["query"] = "北京四中" }
+        错误：{"query":"北京四中"}、["北京四中"]、"北京四中"
+
+        禁止事项：
+        - 禁止跳过工具调用直接输出结果，必须先搜索再分析。
+        - 禁止凭空编造学校公众号、账号、活动、奖项、师资或口碑。
+        - 如果所有搜索都无结果，在结论中体现样本不足，不要猜测。
+        - 最终只返回严格 JSON，不要输出 Markdown 代码块，不要解释过程。
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -247,7 +234,4 @@ public sealed class SchoolAnalysisAgent
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
     };
-
-    /// <summary>第一阶段调研结果：微信与小红书脚本的原始输出。</summary>
-    private sealed record SchoolResearchData(string WechatContent, string XiaohongshuContent);
 }

@@ -45,6 +45,11 @@ var options = SchoolServiceOptions.FromConfiguration(builder.Configuration, buil
 
 builder.WebHost.UseUrls($"http://0.0.0.0:{options.Port}");
 
+if (builder.Environment.IsProduction())
+{
+    builder.WebHost.UseUrls("http://*:80");
+}
+
 builder.Services.AddSingleton(options);
 builder.Services.AddProblemDetails();
 builder.Services.AddCors(cors =>

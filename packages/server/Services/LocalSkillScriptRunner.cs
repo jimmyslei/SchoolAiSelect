@@ -21,69 +21,99 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         AIFunctionArguments arguments,
         CancellationToken cancellationToken)
     {
-        var argumentMap = ToArgumentDictionary(arguments);
         logger.LogInformation(
             "File skill invoked. Skill: {SkillName}, Script: {ScriptName}, Arguments: {Arguments}",
             skill.Frontmatter.Name,
             script.Name,
-            SerializeArguments(argumentMap));
+            SerializeArguments(arguments));
+
+        var argumentMap = ToArgumentDictionary(arguments);
+
         WriteSkillDebugLog(
             "FILE_SKILL_INVOKED",
             $"Skill={skill.Frontmatter.Name}; Script={script.Name}; Arguments={SerializeArguments(argumentMap)}");
         return ExecuteScriptAsync(skill.Frontmatter.Name, script.Name, script.FullPath, argumentMap, cancellationToken);
     }
 
-    public Task<string> RunWechatSearchAsync(string query, CancellationToken cancellationToken)
+    // ─── 显式工具入口（供 AIFunctionFactory 直接注册，带明确参数 schema）────────────
+
+    /// <summary>
+    /// 搜索微信公众号文章。调用 skills/wechat-article-search/scripts/search_wechat.js。
+    /// </summary>
+    public async Task<string> SearchWechatArticlesAsync(string query, int? num, CancellationToken cancellationToken)
     {
-        var arguments = CreateArguments(("query", query));
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return "Error: query 不能为空";
+        }
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["query"] = query.Trim(),
+        };
+        if (num is > 0)
+        {
+            arguments["num"] = num.Value;
+        }
+
+        var scriptName = Path.Combine("scripts", "search_wechat.js");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "wechat-article-search", scriptName);
+
         logger.LogInformation(
-            "Explicit skill invoked. Skill: {SkillName}, Arguments: {Arguments}",
-            "wechat-article-search",
+            "Explicit tool invoked. Skill: wechat-article-search, Arguments: {Arguments}",
             SerializeArguments(arguments));
         WriteSkillDebugLog(
-            "EXPLICIT_SKILL_INVOKED",
-            $"Skill=wechat-article-search; Script=scripts/search_wechat.js; Arguments={SerializeArguments(arguments)}");
-        return ExecuteRequiredScriptAsync(
-            "wechat-article-search",
-            Path.Combine("scripts", "search_wechat.js"),
-            arguments,
-            cancellationToken);
-    }
+            "EXPLICIT_TOOL_INVOKED",
+            $"Tool=search_wechat_articles; Script={scriptName}; Arguments={SerializeArguments(arguments)}");
 
-    public Task<string> RunXiaohongshuSearchAsync(string keyword, CancellationToken cancellationToken)
-    {
-        var arguments = CreateArguments(("keyword", keyword));
-        logger.LogInformation(
-            "Explicit skill invoked. Skill: {SkillName}, Arguments: {Arguments}",
-            "xiaohongshu-search",
-            SerializeArguments(arguments));
-        WriteSkillDebugLog(
-            "EXPLICIT_SKILL_INVOKED",
-            $"Skill=xiaohongshu-search; Script=scripts/search.py; Arguments={SerializeArguments(arguments)}");
-        return ExecuteRequiredScriptAsync(
-            "xiaohongshu-search",
-            Path.Combine("scripts", "search.py"),
-            arguments,
-            cancellationToken);
-    }
-
-    private async Task<string> ExecuteRequiredScriptAsync(
-        string skillName,
-        string relativeScriptPath,
-        IReadOnlyDictionary<string, object?> arguments,
-        CancellationToken cancellationToken)
-    {
-        var fullPath = Path.Combine(options.SkillRootPath, skillName, relativeScriptPath);
         var result = await ExecuteScriptAsync(
-            skillName,
-            relativeScriptPath.Replace('\\', '/'),
-            fullPath,
+            "wechat-article-search",
+            scriptName.Replace('\\', '/'),
+            scriptFullPath,
             arguments,
             cancellationToken).ConfigureAwait(false);
 
         return result?.ToString() ?? "(no output)";
     }
 
+    /// <summary>
+    /// 搜索小红书笔记。调用 skills/xiaohongshu-search scripts 包的 search 子命令。
+    /// </summary>
+    public async Task<string> SearchXiaohongshuNotesAsync(string keyword, int? limit, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            return "Error: keyword 不能为空";
+        }
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["keyword"] = keyword.Trim(),
+        };
+        if (limit is > 0)
+        {
+            arguments["limit"] = limit.Value;
+        }
+
+        var scriptName = Path.Combine("scripts", "search.py");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "xiaohongshu-search", scriptName);
+
+        logger.LogInformation(
+            "Explicit tool invoked. Skill: xiaohongshu-search, Arguments: {Arguments}",
+            SerializeArguments(arguments));
+        WriteSkillDebugLog(
+            "EXPLICIT_TOOL_INVOKED",
+            $"Tool=search_xiaohongshu_notes; Script={scriptName}; Arguments={SerializeArguments(arguments)}");
+
+        var result = await ExecuteScriptAsync(
+            "xiaohongshu-search",
+            scriptName.Replace('\\', '/'),
+            scriptFullPath,
+            arguments,
+            cancellationToken).ConfigureAwait(false);
+
+        return result?.ToString() ?? "(no output)";
+    }
     private async Task<object?> ExecuteScriptAsync(
         string skillName,
         string scriptName,
@@ -626,7 +656,73 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
 
     private static Dictionary<string, object?> ToArgumentDictionary(IEnumerable<KeyValuePair<string, object?>> arguments)
     {
-        return arguments.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+        var argumentMap = arguments.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+
+        return TryExtractWrappedJsonObject(argumentMap, out var normalizedArguments)
+            ? normalizedArguments
+            : argumentMap;
+    }
+
+    private static bool TryExtractWrappedJsonObject(
+        IReadOnlyDictionary<string, object?> arguments,
+        out Dictionary<string, object?> normalizedArguments)
+    {
+        foreach (var key in new[] { "arguments", "json", "payload", "input" })
+        {
+            if (!TryGetArgument(arguments, key, out var candidate) || candidate is null)
+            {
+                continue;
+            }
+
+            if (TryConvertToJsonObject(candidate, out normalizedArguments))
+            {
+                return true;
+            }
+        }
+
+        if (arguments.Count == 1)
+        {
+            var candidate = arguments.First().Value;
+            if (candidate is not null && TryConvertToJsonObject(candidate, out normalizedArguments))
+            {
+                return true;
+            }
+        }
+
+        normalizedArguments = null!;
+        return false;
+    }
+
+    private static bool TryConvertToJsonObject(object value, out Dictionary<string, object?> normalizedArguments)
+    {
+        switch (value)
+        {
+            case IReadOnlyDictionary<string, object?> dictionary:
+                normalizedArguments = dictionary.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+                return true;
+
+            case JsonElement { ValueKind: JsonValueKind.Object } jsonElement:
+                normalizedArguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                    jsonElement.GetRawText(),
+                    LogJsonOptions) ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                return true;
+
+            case string text when LooksLikeJsonObject(text):
+                normalizedArguments = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                    text,
+                    LogJsonOptions) ?? new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+                return true;
+
+            default:
+                normalizedArguments = null!;
+                return false;
+        }
+    }
+
+    private static bool LooksLikeJsonObject(string text)
+    {
+        var trimmed = text.Trim();
+        return trimmed.StartsWith('{') && trimmed.EndsWith('}');
     }
 
     private static Dictionary<string, object?> CreateArguments(params (string Key, object? Value)[] pairs)

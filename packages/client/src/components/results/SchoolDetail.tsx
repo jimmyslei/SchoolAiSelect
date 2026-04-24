@@ -165,18 +165,41 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
               >
                 <div className="flex items-center gap-2">
                   <ExternalLink className="w-3.5 h-3.5 text-neutral-400" />
-                  <span className="text-sm text-neutral-700">
-                    {source.platform}
-                  </span>
+                  {source.url ? (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-sm text-neutral-700 underline-offset-2 transition-colors hover:text-warm-600 hover:underline"
+                    >
+                      {source.platform}
+                    </a>
+                  ) : (
+                    <span className="text-sm text-neutral-700">
+                      {source.platform}
+                    </span>
+                  )}
                   {source.accountName && (
                     <span className="text-xs text-neutral-400">
                       ({source.accountName})
                     </span>
                   )}
                 </div>
-                <span className="text-xs text-neutral-400">
-                  {source.postCount} 篇内容
-                </span>
+                <div className="flex items-center gap-3">
+                  <span className="text-xs text-neutral-400">
+                    {source.postCount} 篇内容
+                  </span>
+                  {source.url && (
+                    <a
+                      href={source.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs font-medium text-warm-600 transition-colors hover:text-warm-700"
+                    >
+                      查看来源
+                    </a>
+                  )}
+                </div>
               </div>
             ))}
           </div>
