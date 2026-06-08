@@ -99,6 +99,97 @@
     "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
+/* 暗色模式变量 */
+:root.dark {
+  --warm-50: #1a1210;
+  --warm-100: #241814;
+  --warm-200: #332420;
+  --warm-300: #4a3530;
+  --warm-400: #c96533;
+  --warm-500: #e07a3f;
+  --warm-600: #ee9a5d;
+  --warm-700: #f6bb88;
+  --warm-800: #fbd7b7;
+  --warm-900: #feeddc;
+  --warm-950: #fff8f1;
+
+  --sand-50: #171310;
+  --sand-100: #221c17;
+  --sand-200: #332a22;
+  --sand-300: #c7a47f;
+  --sand-400: #dbc4a7;
+  --sand-500: #eadcc9;
+
+  --peach-50: #1a1210;
+  --peach-100: #2a1a14;
+  --peach-200: #3d2820;
+  --peach-300: #f57d4a;
+  --peach-400: #ffa06f;
+  --peach-500: #ffc8aa;
+
+  --sage-50: #101410;
+  --sage-100: #1a2018;
+  --sage-200: #2a3426;
+  --sage-300: #7f9f67;
+  --sage-400: #a8bf93;
+  --sage-500: #cad9bc;
+
+  --sky-50: #0d1320;
+  --sky-100: #151e30;
+  --sky-200: #223048;
+  --sky-300: #5f9af2;
+  --sky-400: #8ebcff;
+  --sky-500: #bdd8ff;
+
+  --gold-50: #1a1608;
+  --gold-100: #2a2210;
+  --gold-200: #3d3318;
+  --gold-300: #e8ae2f;
+  --gold-400: #f8c95a;
+  --gold-500: #ffe08a;
+
+  --neutral-50: #121010;
+  --neutral-100: #1c1816;
+  --neutral-200: #2a2420;
+  --neutral-300: #3d3530;
+  --neutral-400: #6b5e54;
+  --neutral-500: #9a8a7c;
+  --neutral-600: #b8a898;
+  --neutral-700: #d2c6b7;
+  --neutral-800: #e8ddd2;
+  --neutral-900: #f3eee7;
+
+  --background: #0f0d0c;
+  --foreground: #e8ddd2;
+  --card: rgba(28, 24, 22, 0.92);
+  --card-foreground: #e8ddd2;
+  --popover: #1c1816;
+  --popover-foreground: #e8ddd2;
+  --primary: #e07a3f;
+  --primary-foreground: #1a1210;
+  --secondary: #221c17;
+  --secondary-foreground: #d2c6b7;
+  --muted: #1c1816;
+  --muted-foreground: #9a8a7c;
+  --accent: #2a1a14;
+  --accent-foreground: #fbd7b7;
+  --destructive: #e85a4a;
+  --border: rgba(210, 198, 183, 0.12);
+  --input: rgba(210, 198, 183, 0.14);
+  --ring: rgba(224, 122, 63, 0.3);
+  --chart-1: #e07a3f;
+  --chart-2: #7f9f67;
+  --chart-3: #5f9af2;
+  --chart-4: #e8ae2f;
+  --chart-5: #f57d4a;
+
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.2);
+  --shadow-sm: 0 8px 24px rgba(0, 0, 0, 0.25);
+  --shadow-md: 0 18px 40px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 28px 70px rgba(0, 0, 0, 0.35);
+  --shadow-xl: 0 40px 100px rgba(0, 0, 0, 0.4);
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -212,6 +303,15 @@ body {
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  transition:
+    background-color 0.3s,
+    color 0.3s;
+}
+
+:root.dark body {
+  background:
+    radial-gradient(circle at top, rgba(224, 122, 63, 0.08), transparent 32%),
+    linear-gradient(180deg, #0f0d0c 0%, #121010 42%, #141210 100%);
 }
 
 body::selection {
@@ -252,10 +352,24 @@ svg {
   -webkit-backdrop-filter: blur(18px);
 }
 
+:root.dark .surface-panel {
+  background: linear-gradient(
+    180deg,
+    rgba(28, 24, 22, 0.96),
+    rgba(22, 18, 16, 0.88)
+  );
+  border-color: rgba(210, 198, 183, 0.08);
+}
+
 .surface-elevated {
   background: rgba(255, 251, 246, 0.92);
   border: 1px solid rgba(127, 111, 95, 0.1);
   box-shadow: var(--shadow-md);
+}
+
+:root.dark .surface-elevated {
+  background: rgba(28, 24, 22, 0.92);
+  border-color: rgba(210, 198, 183, 0.06);
 }
 
 .warm-grid {

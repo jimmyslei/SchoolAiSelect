@@ -40,16 +40,19 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
     /// <summary>
     /// 搜索微信公众号文章。调用 skills/wechat-article-search/scripts/search_wechat.js。
     /// </summary>
-    public async Task<string> SearchWechatArticlesAsync(string query, int? num, CancellationToken cancellationToken)
+    public async Task<string> SearchWechatArticlesAsync(string query, int? num, string? region, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(query))
         {
             return "Error: query 不能为空";
         }
 
+        var regionPrefix = ExtractRegionPrefix(region);
+        var effectiveQuery = $"{regionPrefix}{query.Trim()}";
+
         var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["query"] = query.Trim(),
+            ["query"] = effectiveQuery,
         };
         if (num is > 0)
         {
@@ -79,16 +82,19 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
     /// <summary>
     /// 搜索小红书笔记。调用 skills/xiaohongshu-search scripts 包的 search 子命令。
     /// </summary>
-    public async Task<string> SearchXiaohongshuNotesAsync(string keyword, int? limit, CancellationToken cancellationToken)
+    public async Task<string> SearchXiaohongshuNotesAsync(string keyword, int? limit, string? region, CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(keyword))
         {
             return "Error: keyword 不能为空";
         }
 
+        var regionPrefix = ExtractRegionPrefix(region);
+        var effectiveKeyword = $"{regionPrefix}{keyword.Trim()}";
+
         var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
         {
-            ["keyword"] = keyword.Trim(),
+            ["keyword"] = effectiveKeyword,
         };
         if (limit is > 0)
         {
@@ -114,6 +120,244 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
 
         return result?.ToString() ?? "(no output)";
     }
+
+    /// <summary>
+    /// 学校信息专用联网搜索。基于 skills/web-search/general-web-search/web_search.js，
+    /// 但会针对学校场景做查询增强（清洗校名、追加教育领域关键词、强制精确匹配）
+    /// 与结果相关性过滤（标题/摘要必须命中校名特征 token），避免 Bing 把超长校名
+    /// 降级匹配成"重庆""幼儿园"等通用词、返回旅游/无关内容。
+    /// </summary>
+    public async Task<string> SearchSchoolInfoAsync(string schoolName, string? aspect, string? region, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(schoolName))
+        {
+            return "Error: school_name 不能为空";
+        }
+
+        var cleanedName = CleanSchoolName(schoolName);
+        if (string.IsNullOrWhiteSpace(cleanedName))
+        {
+            return "Error: 清洗后的 school_name 为空";
+        }
+
+        var distinctiveToken = ExtractDistinctiveToken(cleanedName);
+        var regionPrefix = ExtractRegionPrefix(region);
+
+        // 将 aspect 转换为具体搜索关键词，追加到查询中，确保每次按不同维度返回差异化结果
+        var aspectKeywords = NormalizeAspectKeywords(aspect);
+        var query = $"{regionPrefix}{cleanedName} {aspectKeywords}".Trim();
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["query"] = query,
+            ["num"] = 15,
+        };
+
+        var scriptName = Path.Combine("scripts", "search_web.js");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "general-web-search", scriptName);
+
+        logger.LogInformation(
+            "Explicit tool invoked. Skill: search_school_info, SchoolName: {SchoolName}, Aspect: {Aspect}, Query: {Query}",
+            schoolName, aspect, query);
+        WriteSkillDebugLog(
+            "EXPLICIT_TOOL_INVOKED",
+            $"Tool=search_school_info; Script={scriptName}; SchoolName={schoolName}; Aspect={aspect}; Query={query}; DistinctiveToken={distinctiveToken}");
+
+        var rawResult = await ExecuteScriptAsync(
+            "general-web-search",
+            scriptName.Replace('\\', '/'),
+            scriptFullPath,
+            arguments,
+            cancellationToken).ConfigureAwait(false);
+
+        var rawText = rawResult?.ToString();
+        if (string.IsNullOrWhiteSpace(rawText) || rawText.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+        {
+            return rawText ?? "(no output)";
+        }
+
+        // 相关性过滤：只保留 title/snippet 命中校名特征的条目
+        var filtered = FilterRelevantSchoolResults(rawText, cleanedName, distinctiveToken, schoolName);
+
+        WriteSkillDebugLog(
+            "SCHOOL_SEARCH_FILTERED",
+            $"SchoolName={schoolName}; DistinctiveToken={distinctiveToken}; Kept={filtered.keptCount}/{filtered.totalCount}");
+
+        return filtered.json;
+    }
+
+    private static string CleanSchoolName(string name)
+    {
+        // 去掉中英文括号及其内容（分校标识/地址别名常导致 Bing 匹配混乱）
+        var cleaned = System.Text.RegularExpressions.Regex.Replace(name, @"[（(\[][^）)\]]*[）)\]]", string.Empty);
+        cleaned = System.Text.RegularExpressions.Regex.Replace(cleaned, @"\s+", " ").Trim();
+        return cleaned;
+    }
+
+    /// <summary>
+    /// 从地址中提取"市+区/县"前缀，用于搜索消歧。
+    /// 例："重庆市巴南区鱼轻路10号" → "重庆市巴南区"
+    /// </summary>
+    private static string ExtractRegionPrefix(string? address)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+            return string.Empty;
+
+        var match = System.Text.RegularExpressions.Regex.Match(
+            address,
+            @"^(.{2,5}(?:市|州|地区)).{2,6}(?:区|县|市|镇)");
+        if (match.Success)
+            return match.Value;
+
+        var cityMatch = System.Text.RegularExpressions.Regex.Match(
+            address,
+            @"^.{2,5}(?:市|州|地区)");
+        if (cityMatch.Success)
+            return cityMatch.Value;
+
+        return string.Empty;
+    }
+
+    /// <summary>
+    /// 提取最具区分度的 token，用于相关性过滤：
+    /// 优先取"学校类型词"（幼儿园/小学/中学/学校/大学）前最多 6 个汉字。
+    /// </summary>
+    private static string ExtractDistinctiveToken(string cleanedName)
+    {
+        var match = System.Text.RegularExpressions.Regex.Match(
+            cleanedName,
+            @"([\u4e00-\u9fa5A-Za-z0-9]{2,8})(实验幼儿园|实验小学|实验中学|实验学校|双语学校|国际学校|附属中学|附属小学|附属幼儿园|幼儿园|幼稚园|小学|初中|中学|高中|学校|学院|大学)");
+
+        if (match.Success)
+        {
+            return match.Groups[1].Value + match.Groups[2].Value;
+        }
+
+        // 退化策略：去掉行政前缀
+        var stripped = System.Text.RegularExpressions.Regex.Replace(
+            cleanedName,
+            @"^(.{2,4}省)?(.{2,5}市)?(.{2,5}区|.{2,5}县|.{2,5}州)?",
+            string.Empty);
+        return string.IsNullOrWhiteSpace(stripped) ? cleanedName : stripped;
+    }
+
+    private static string NormalizeAspectKeywords(string? aspect)
+    {
+        if (string.IsNullOrWhiteSpace(aspect))
+        {
+            return "评价 师资 家长 招生";
+        }
+
+        return aspect.Trim() switch
+        {
+            "师资" or "teaching" => "师资 教师 教学质量",
+            "评价" or "口碑" or "reputation" => "家长 评价 口碑 怎么样",
+            "招生" or "enrollment" => "招生 学区 划片 收费",
+            "活动" or "校园活动" or "activity" => "活动 比赛 获奖 校园",
+            "新闻" or "news" => "新闻 公告 官网",
+            _ => aspect.Trim() + " 评价 家长",
+        };
+    }
+
+    private static (string json, int keptCount, int totalCount) FilterRelevantSchoolResults(
+        string rawJson,
+        string cleanedName,
+        string distinctiveToken,
+        string originalName)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+
+            // 兼容两种返回结构：
+            //  - web_search.py：直接是 [{title,url,snippet}, ...]
+            //  - sogou-search：{ query, total, results: [{title,url,summary,source}, ...] }
+            JsonElement itemsArray;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsArray = doc.RootElement;
+            }
+            else if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("results", out var resultsProp)
+                && resultsProp.ValueKind == JsonValueKind.Array)
+            {
+                itemsArray = resultsProp;
+            }
+            else
+            {
+                return (rawJson, 0, 0);
+            }
+
+            var matchTokens = new List<string>();
+            if (!string.IsNullOrWhiteSpace(distinctiveToken)) matchTokens.Add(distinctiveToken);
+            if (!string.IsNullOrWhiteSpace(cleanedName) && cleanedName != distinctiveToken) matchTokens.Add(cleanedName);
+
+            // 再加上 distinctive 去掉学校类型后的"核心识别词"（如"小太阳幼儿园" → "小太阳"）
+            var coreToken = System.Text.RegularExpressions.Regex.Replace(
+                distinctiveToken,
+                @"(实验幼儿园|实验小学|实验中学|实验学校|双语学校|国际学校|附属中学|附属小学|附属幼儿园|幼儿园|幼稚园|小学|初中|中学|高中|学校|学院|大学)$",
+                string.Empty);
+            if (!string.IsNullOrWhiteSpace(coreToken) && coreToken.Length >= 2 && !matchTokens.Contains(coreToken))
+            {
+                matchTokens.Add(coreToken);
+            }
+
+            var kept = new List<object>();
+            var total = 0;
+            foreach (var item in itemsArray.EnumerateArray())
+            {
+                total++;
+                var title = item.TryGetProperty("title", out var t) ? t.GetString() ?? string.Empty : string.Empty;
+                // 兼容 web_search 的 snippet 与 sogou-search 的 summary
+                var snippet = item.TryGetProperty("snippet", out var s) ? s.GetString() ?? string.Empty
+                    : item.TryGetProperty("summary", out var sm) ? sm.GetString() ?? string.Empty
+                    : string.Empty;
+                var url = item.TryGetProperty("url", out var u) ? u.GetString() ?? string.Empty : string.Empty;
+                var haystack = title + " " + snippet;
+
+                var hit = matchTokens.Any(tok => haystack.Contains(tok, StringComparison.OrdinalIgnoreCase));
+                if (!hit) continue;
+
+                kept.Add(new
+                {
+                    title,
+                    url,
+                    snippet,
+                });
+            }
+
+            // 如果一个都没命中，返回结构化的"无相关结果"提示，避免 LLM 被无关内容污染
+            if (kept.Count == 0)
+            {
+                var hintJson = JsonSerializer.Serialize(new
+                {
+                    note = $"未检索到与 \"{originalName}\" 相关的公开网页。原始查询返回 {total} 条均与该校无关，已全部过滤。",
+                    matched_tokens = matchTokens,
+                    results = Array.Empty<object>(),
+                }, FilteredResultJsonOptions);
+                return (hintJson, 0, total);
+            }
+
+            var keptJson = JsonSerializer.Serialize(new
+            {
+                matched_tokens = matchTokens,
+                results = kept,
+            }, FilteredResultJsonOptions);
+            return (keptJson, kept.Count, total);
+        }
+        catch (JsonException)
+        {
+            // 解析失败时直接回传原始文本，让上游决定如何处理
+            return (rawJson, 0, 0);
+        }
+    }
+
+    private static readonly JsonSerializerOptions FilteredResultJsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+        WriteIndented = false,
+    };
+
     private async Task<object?> ExecuteScriptAsync(
         string skillName,
         string scriptName,
@@ -328,14 +572,12 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         var scriptStem = Path.GetFileNameWithoutExtension(scriptName);
         var positionalArguments = GetExplicitPositionalArguments(values).ToList();
 
-        var usedCompatibility = false;
         if (positionalArguments.Count == 0)
         {
             var compatibilityArgs = GetCompatibilityPositionalArguments(scriptStem, values).ToList();
             if (compatibilityArgs.Count > 0)
             {
                 positionalArguments.AddRange(compatibilityArgs);
-                usedCompatibility = true;
             }
         }
 
@@ -363,8 +605,10 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
             arguments.Add(positionalArgument);
         }
 
-        // 已有位置参数时，跳过剩余 key-value 参数（兼容性模式或显式位置参数已覆盖所有输入）
-        if (usedCompatibility || GetExplicitPositionalArguments(values).Any())
+        // 已有显式位置参数时，跳过剩余 key-value 参数
+        // 注意：兼容性模式（usedCompatibility）不再阻止命名参数传递，
+        // 以便 --num / --limit 等命名标志仍能传给脚本（search_web.js / search_wechat.js 均支持 --num）
+        if (GetExplicitPositionalArguments(values).Any())
         {
             return;
         }
@@ -442,7 +686,10 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         return scriptStem switch
         {
             "search_wechat" => GetPositionalValues(arguments, "query", "keyword", "schoolName"),
+            "search_web" => GetPositionalValues(arguments, "query"),
+            "search_sogou" => GetPositionalValues(arguments, "query", "keyword", "schoolName"),
             "search" => GetPositionalValues(arguments, "keyword", "query", "schoolName"),
+            "web_search" => GetPositionalValues(arguments, "query"),
             "feed" => GetPositionalValues(arguments, "feed_id", "feedId", "id", "xsec_token", "xsecToken"),
             "user" => GetPositionalValues(arguments, "user_id", "userId", "id", "xsec_token", "xsecToken"),
             _ => [],
@@ -467,9 +714,14 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
             "search_wechat" => key.Equals("query", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("keyword", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("schoolName", StringComparison.OrdinalIgnoreCase),
+            "search_web" => key.Equals("query", StringComparison.OrdinalIgnoreCase),
+            "search_sogou" => key.Equals("query", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("keyword", StringComparison.OrdinalIgnoreCase)
+                || key.Equals("schoolName", StringComparison.OrdinalIgnoreCase),
             "search" => key.Equals("keyword", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("query", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("schoolName", StringComparison.OrdinalIgnoreCase),
+            "web_search" => key.Equals("query", StringComparison.OrdinalIgnoreCase),
             "feed" => key.Equals("feed_id", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("feedId", StringComparison.OrdinalIgnoreCase)
                 || key.Equals("id", StringComparison.OrdinalIgnoreCase)
@@ -723,18 +975,6 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
     {
         var trimmed = text.Trim();
         return trimmed.StartsWith('{') && trimmed.EndsWith('}');
-    }
-
-    private static Dictionary<string, object?> CreateArguments(params (string Key, object? Value)[] pairs)
-    {
-        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var (key, value) in pairs)
-        {
-            arguments[key] = value;
-        }
-
-        return arguments;
     }
 
     private static readonly string[] ReservedArgumentKeys = ["args", "argv", "positionalArgs", "positional", "_"];

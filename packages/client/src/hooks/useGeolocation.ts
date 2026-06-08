@@ -50,8 +50,51 @@ export function useGeolocation() {
     setStatus("requesting");
     setError(null);
 
-    // 1) 先调用后端 IP 定位接口
-    let ipErrorMessage: string | null = null;
+    const browserSupported =
+      typeof navigator !== "undefined" && "geolocation" in navigator;
+
+    // 1) 优先使用浏览器 Geolocation API 获取经纬度
+    let browserErrorMessage: string | null = null;
+    let browserPermissionDenied = false;
+    if (browserSupported) {
+      try {
+        const position = await getBrowserPosition();
+        const { latitude, longitude, accuracy } = position.coords;
+
+        let address = "当前位置";
+        try {
+          address = await reverseGeocodeCoords(latitude, longitude);
+        } catch (reverseError) {
+          console.warn(
+            "[useGeolocation] 逆地理编码失败，使用默认地址标签:",
+            reverseError,
+          );
+        }
+
+        setLocation({ latitude, longitude, address, accuracy });
+        setStatus("success");
+        return;
+      } catch (browserError) {
+        console.warn(
+          "[useGeolocation] 浏览器定位失败，回退到 IP 定位:",
+          browserError,
+        );
+        if (isGeolocationPositionError(browserError)) {
+          browserPermissionDenied = browserError.code === 1;
+          browserErrorMessage = getBrowserLocationError(browserError);
+        } else {
+          browserErrorMessage =
+            browserError instanceof Error
+              ? browserError.message
+              : "浏览器定位失败";
+        }
+      }
+    } else {
+      console.warn("[useGeolocation] 当前浏览器不支持定位，回退到 IP 定位");
+      browserErrorMessage = "当前浏览器不支持定位";
+    }
+
+    // 2) 浏览器定位失败或不支持 → 调用后端 IP 定位接口
     try {
       const geo = await getLocationByIp();
       if (
@@ -64,51 +107,19 @@ export function useGeolocation() {
         setStatus("success");
         return;
       }
-      ipErrorMessage = "IP定位返回坐标无效";
-      console.warn(
-        "[useGeolocation] IP 定位返回坐标无效，回退到浏览器定位:",
-        geo,
+      console.warn("[useGeolocation] IP 定位返回坐标无效:", geo);
+      setStatus(browserPermissionDenied ? "denied" : "error");
+      setError(
+        `${browserErrorMessage ?? "浏览器定位失败"}；IP定位返回坐标无效，请手动输入地址`,
       );
     } catch (ipError) {
-      ipErrorMessage =
+      console.warn("[useGeolocation] IP 定位接口失败:", ipError);
+      const ipMessage =
         ipError instanceof Error ? ipError.message : "IP定位失败";
-      console.warn(
-        "[useGeolocation] IP 定位接口失败，回退到浏览器定位:",
-        ipError,
+      setStatus(browserPermissionDenied ? "denied" : "error");
+      setError(
+        `${browserErrorMessage ?? "浏览器定位失败"}；IP定位也失败：${ipMessage}`,
       );
-    }
-
-    // 2) IP 定位失败 → 使用浏览器 Geolocation API 获取经纬度
-    try {
-      const position = await getBrowserPosition();
-      const { latitude, longitude, accuracy } = position.coords;
-
-      let address = "当前位置";
-      try {
-        address = await reverseGeocodeCoords(latitude, longitude);
-      } catch (reverseError) {
-        console.warn(
-          "[useGeolocation] 逆地理编码失败，使用默认地址标签:",
-          reverseError,
-        );
-      }
-
-      setLocation({ latitude, longitude, address, accuracy });
-      setStatus("success");
-    } catch (browserError) {
-      console.warn("[useGeolocation] 浏览器定位失败:", browserError);
-
-      if (isGeolocationPositionError(browserError)) {
-        setStatus(browserError.code === 1 ? "denied" : "error");
-        setError(getBrowserLocationError(browserError));
-      } else {
-        setStatus("error");
-        setError(
-          browserError instanceof Error
-            ? `${ipErrorMessage ?? "IP定位失败"}；浏览器定位也失败：${browserError.message}`
-            : `${ipErrorMessage ?? "IP定位失败"}，请手动输入地址`,
-        );
-      }
     }
   }, []);
 

@@ -6,26 +6,110 @@ public sealed record SchoolServiceOptions(
     string AmapSecurityKey,
     string DashScopeApiKey,
     string DashScopeBaseUrl,
+    bool DashScopeUseResponsesApi,
     string DashScopeModel,
     string NodeCommand,
     string PythonCommand,
     TimeSpan SkillTimeout,
-    string SkillRootPath)
+    string SkillRootPath,
+    string DatabasePath,
+    string SmtpHost,
+    int SmtpPort,
+    bool SmtpEnableSsl,
+    string SmtpUserName,
+    string SmtpPassword,
+    string SmtpFromEmail,
+    string SmtpFromName,
+    int AnalysisMaxConcurrency,
+    int AmapPageSize)
 {
-    public static SchoolServiceOptions FromConfiguration(IConfiguration configuration, string contentRootPath)
+    public static SchoolServiceOptions FromConfiguration(IConfiguration configuration)
     {
         var timeoutSeconds = int.TryParse(configuration["SKILL_TIMEOUT_SECONDS"], out var value) ? value : 90;
+        var maxConcurrency = int.TryParse(configuration["ANALYSIS_MAX_CONCURRENCY"], out var concurrency) ? concurrency : 8;
+        var configuredBaseUrl = configuration["DASHSCOPE_BASE_URL"] ?? configuration["OPENAI_BASE_URL"];
+        var apiStyle = configuration["DASHSCOPE_API_STYLE"] ?? configuration["OPENAI_API_STYLE"];
+        var useResponsesApi = ShouldUseResponsesApi(configuredBaseUrl, apiStyle);
 
         return new SchoolServiceOptions(
             Port: int.TryParse(configuration["PORT"], out var port) ? port : 3001,
             AmapApiKey: configuration["AMAP_API_KEY"] ?? string.Empty,
             AmapSecurityKey: configuration["SK"] ?? string.Empty,
             DashScopeApiKey: configuration["DASHSCOPE_API_KEY"] ?? configuration["OPENAI_API_KEY"] ?? string.Empty,
-            DashScopeBaseUrl: configuration["DASHSCOPE_BASE_URL"] ?? configuration["OPENAI_BASE_URL"] ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            DashScopeBaseUrl: NormalizeOpenAiEndpoint(configuredBaseUrl) ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            DashScopeUseResponsesApi: useResponsesApi,
             DashScopeModel: configuration["DASHSCOPE_MODEL"] ?? configuration["OPENAI_CHAT_MODEL_NAME"] ?? "qwen3.6-plus",
             NodeCommand: configuration["NODE_COMMAND"] ?? "node",
             PythonCommand: configuration["PYTHON_COMMAND"] ?? "python",
             SkillTimeout: TimeSpan.FromSeconds(Math.Max(timeoutSeconds, 15)),
-            SkillRootPath: Path.Combine(contentRootPath, "skills"));
+            SkillRootPath: ResolveSkillRootPath(configuration),
+            DatabasePath: ResolveDatabasePath(configuration),
+            SmtpHost: configuration["SMTP_HOST"] ?? string.Empty,
+            SmtpPort: Math.Clamp(int.TryParse(configuration["SMTP_PORT"], out var smtpPort) ? smtpPort : 587, 1, 65535),
+            SmtpEnableSsl: !bool.TryParse(configuration["SMTP_ENABLE_SSL"], out var smtpEnableSsl) || smtpEnableSsl,
+            SmtpUserName: configuration["SMTP_USERNAME"] ?? string.Empty,
+            SmtpPassword: configuration["SMTP_PASSWORD"] ?? string.Empty,
+            SmtpFromEmail: configuration["SMTP_FROM_EMAIL"] ?? configuration["SMTP_USERNAME"] ?? string.Empty,
+            SmtpFromName: configuration["SMTP_FROM_NAME"] ?? "学校推荐系统",
+            AnalysisMaxConcurrency: Math.Clamp(maxConcurrency, 1, 32),
+            AmapPageSize: Math.Clamp(int.TryParse(configuration["AMAP_PAGE_SIZE"], out var pageSize) ? pageSize : 25, 1, 25));
+    }
+
+    private static bool ShouldUseResponsesApi(string? configuredBaseUrl, string? apiStyle)
+    {
+        if (!string.IsNullOrWhiteSpace(apiStyle))
+        {
+            return string.Equals(apiStyle.Trim(), "responses", StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.IsNullOrWhiteSpace(configuredBaseUrl))
+        {
+            return false;
+        }
+
+        return configuredBaseUrl.Trim().TrimEnd('/').EndsWith("/responses", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string? NormalizeOpenAiEndpoint(string? configuredBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(configuredBaseUrl))
+        {
+            return null;
+        }
+
+        var trimmed = configuredBaseUrl.Trim().Trim().Trim('"').TrimEnd('/');
+        return trimmed.EndsWith("/responses", StringComparison.OrdinalIgnoreCase)
+            ? trimmed[..^"/responses".Length]
+            : trimmed;
+    }
+
+    private static string ResolveSkillRootPath(IConfiguration configuration)
+    {
+        // 优先使用配置值（支持绝对或相对路径）
+        var configured = configuration["SKILL_ROOT_PATH"];
+
+        // 程序所在目录（发布后即可执行文件目录），相对它解析 skills 路径，
+        // 避免受到工作目录 / ContentRoot 影响
+        var baseDir = AppContext.BaseDirectory;
+
+        if (!string.IsNullOrWhiteSpace(configured))
+        {
+            return Path.IsPathRooted(configured)
+                ? configured
+                : Path.GetFullPath(Path.Combine(baseDir, configured));
+        }
+
+        return Path.Combine(baseDir, "skills");
+    }
+
+    private static string ResolveDatabasePath(IConfiguration configuration)
+    {
+        var configured = configuration["DATABASE_PATH"];
+        var baseDir = AppContext.BaseDirectory;
+        var path = string.IsNullOrWhiteSpace(configured)
+            ? Path.Combine(baseDir, "data", "school-recommender.db")
+            : configured.Trim().Trim('"');
+
+        return Path.IsPathRooted(path) ? path : Path.GetFullPath(Path.Combine(baseDir, path));
     }
 }

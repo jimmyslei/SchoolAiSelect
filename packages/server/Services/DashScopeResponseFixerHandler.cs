@@ -16,7 +16,8 @@ namespace SchoolRecommender.Api.Services;
 /// 标准 OpenAI 格式应为：
 ///   "arguments": "{\"keyword\": \"学校名\"}"
 ///
-/// 本处理器将上述非标准格式统一修正为具名参数 JSON 对象字符串。
+/// 本处理器同时兼容 Chat Completions 与 Responses API，
+/// 将上述非标准格式统一修正为具名参数 JSON 对象字符串。
 /// </summary>
 public sealed class DashScopeResponseFixerHandler : DelegatingHandler
 {
@@ -93,128 +94,91 @@ public sealed class DashScopeResponseFixerHandler : DelegatingHandler
 
         var modified = false;
 
-        // 遍历 choices[*].message.tool_calls[*].function.arguments
-        var choices = root["choices"]?.AsArray();
-        if (choices is null) return null;
+        modified |= TryFixChatCompletionsArguments(root);
+        modified |= TryFixResponsesArguments(root);
 
-        foreach (var choice in choices)
+        if (root["response"] is JsonNode responseNode)
         {
-            if (choice is null) continue;
-
-            var message = choice["message"];
-            if (message is null) continue;
-
-            var toolCalls = message["tool_calls"]?.AsArray();
-            if (toolCalls is null) continue;
-
-            foreach (var toolCall in toolCalls)
-            {
-                if (toolCall is null) continue;
-
-                var function = toolCall["function"];
-                if (function is null) continue;
-
-                var functionName = function["name"]?.GetValue<string>();
-                var argumentsNode = function["arguments"];
-                if (argumentsNode is null) continue;
-
-                string? fixedArguments = null;
-
-                if (argumentsNode is JsonValue jsonValue)
-                {
-                    // 正常情况：arguments 是字符串，值可能是数组 JSON 字符串 "[\"keyword\"]"
-                    var raw = jsonValue.GetValue<string>();
-                    fixedArguments = TryFixArgumentsString(raw, functionName);
-                }
-                else if (argumentsNode is JsonArray jsonArray)
-                {
-                    // 非标准情况：arguments 直接是 JSON 数组节点
-                    fixedArguments = ArrayToNamedArgsJson(jsonArray, functionName);
-                }
-
-                if (fixedArguments is not null)
-                {
-                    function["arguments"] = JsonValue.Create(fixedArguments);
-                    modified = true;
-                }
-            }
+            modified |= TryFixResponsesArguments(responseNode);
         }
 
         return modified ? root.ToJsonString() : null;
     }
 
-    /// <summary>
-    /// 如果 arguments 字符串解析后为数组或纯字符串值，则转换为具名参数对象字符串。
-    /// </summary>
-    private static string? TryFixArgumentsString(string? raw, string? functionName)
+    private static bool TryFixChatCompletionsArguments(JsonNode root)
     {
-        if (string.IsNullOrWhiteSpace(raw)) return null;
-
-        var trimmed = raw.Trim();
-
-        // 已经是对象格式，无需修复
-        if (trimmed.StartsWith('{'))
+        var modified = false;
+        var choices = root["choices"]?.AsArray();
+        if (choices is null)
         {
-            return null;
+            return false;
         }
 
-        // 数组格式：解析后转换为具名参数对象
-        if (trimmed.StartsWith('['))
+        foreach (var choice in choices)
         {
-            try
+            var toolCalls = choice?["message"]?["tool_calls"]?.AsArray();
+            if (toolCalls is null)
             {
-                var arrayNode = JsonNode.Parse(trimmed) as JsonArray;
-                if (arrayNode is null) return null;
-
-                return ArrayToNamedArgsJson(arrayNode, functionName);
+                continue;
             }
-            catch
+
+            foreach (var toolCall in toolCalls)
             {
-                return null;
+                var function = toolCall?["function"];
+                if (function is null)
+                {
+                    continue;
+                }
+
+                var functionName = function["name"]?.GetValue<string>();
+                var fixedArguments = FunctionCallArgumentNormalization.TryNormalizeArgumentsJsonNode(
+                    functionName,
+                    function["arguments"]);
+
+                if (fixedArguments is null)
+                {
+                    continue;
+                }
+
+                function["arguments"] = JsonValue.Create(fixedArguments);
+                modified = true;
             }
         }
 
-        // 纯字符串值（非 JSON 格式）：作为主参数值包装为具名参数对象
-        var primaryParam = GetPrimaryParameterName(functionName);
-        return JsonSerializer.Serialize(new Dictionary<string, string> { [primaryParam] = trimmed });
+        return modified;
     }
 
-    /// <summary>
-    /// 将 JSON 数组转为具名参数对象的 JSON 字符串。
-    /// 根据函数名推断主参数名称。
-    /// </summary>
-    private static string? ArrayToNamedArgsJson(JsonArray array, string? functionName)
+    private static bool TryFixResponsesArguments(JsonNode root)
     {
-        var items = array.ToList();
-        if (items.Count == 0) return null;
-
-        var result = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        var primaryParam = GetPrimaryParameterName(functionName);
-        result[primaryParam] = items[0]?.GetValue<object>();
-
-        var secondaryParams = GetSecondaryParameterNames(functionName);
-        for (var i = 1; i < items.Count && i - 1 < secondaryParams.Length; i++)
+        var modified = false;
+        var output = root["output"]?.AsArray();
+        if (output is null)
         {
-            result[secondaryParams[i - 1]] = items[i]?.GetValue<object>();
+            return false;
         }
 
-        return JsonSerializer.Serialize(result);
+        foreach (var item in output)
+        {
+            var type = item?["type"]?.GetValue<string>();
+            if (!string.Equals(type, "function_call", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            var functionName = item?["name"]?.GetValue<string>();
+            var fixedArguments = FunctionCallArgumentNormalization.TryNormalizeArgumentsJsonNode(
+                functionName,
+                item?["arguments"]);
+
+            if (fixedArguments is null)
+            {
+                continue;
+            }
+
+            item!["arguments"] = JsonValue.Create(fixedArguments);
+            modified = true;
+        }
+
+        return modified;
     }
-
-    private static string GetPrimaryParameterName(string? functionName) =>
-        functionName switch
-        {
-            var n when n is not null && n.Contains("wechat", StringComparison.OrdinalIgnoreCase) => "query",
-            var n when n is not null && n.Contains("feed", StringComparison.OrdinalIgnoreCase) => "feed_id",
-            var n when n is not null && n.Contains("user", StringComparison.OrdinalIgnoreCase) => "user_id",
-            _ => "keyword",
-        };
-
-    private static string[] GetSecondaryParameterNames(string? functionName) =>
-        functionName switch
-        {
-            var n when n is not null && n.Contains("feed", StringComparison.OrdinalIgnoreCase) => ["xsec_token"],
-            var n when n is not null && n.Contains("user", StringComparison.OrdinalIgnoreCase) => ["xsec_token"],
-            _ => [],
-        };
 }

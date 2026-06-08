@@ -53,6 +53,7 @@ CodeCoverage/
 TestResult.xml
 nunit-*.xml
 
+.vs
 node_modules
 dist
 .env
@@ -60,3 +61,5 @@ dist
 .DS_Store
 dist-deploy
 deploy
+bin
+.artifacts

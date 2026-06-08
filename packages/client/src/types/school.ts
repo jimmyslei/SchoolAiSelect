@@ -3,12 +3,17 @@
    ============================================ */
 
 /** 学校类型 */
-export type SchoolType = "kindergarten" | "primary" | "middle";
+export type SchoolType =
+  | "kindergarten"
+  | "primary"
+  | "junior_high"
+  | "senior_high";
 
 export const SchoolTypeLabels: Record<SchoolType, string> = {
   kindergarten: "幼儿园",
   primary: "小学",
-  middle: "中学",
+  junior_high: "初中",
+  senior_high: "高中",
 };
 
 /** 学校基本信息 */
@@ -59,6 +64,8 @@ export interface SchoolAnalysis {
   studentActivityDesc: string;
   /** 信息来源列表 */
   sources: InfoSource[];
+  /** 高中前5年录取分数线 JSON */
+  admissionCutoffScores?: string;
 }
 
 /** 学校排名结果 */
@@ -66,9 +73,22 @@ export interface SchoolRanking {
   school: School;
   analysis: SchoolAnalysis;
   rank: number;
-  overallScore: number; // 加权综合分 0-100
-  recommendation: string; // 推荐理由
-  isTopPick: boolean; // 是否为首选推荐
+  overallScore: number;
+  /** 推荐理由 */
+  recommendation: string;
+  /** 是否为首选推荐 */
+  isTopPick: boolean;
+  /** 高中录取匹配分 (0-100) */
+  admissionMatchScore?: number;
+  /** 前端流式状态：是否仍在分析中 */
+  analyzing?: boolean;
+}
+
+/** 高中录取分数线 */
+export interface AdmissionCutoffScore {
+  year: number;
+  score: number;
+  schoolName?: string;
 }
 
 /** 搜索请求 */
@@ -77,6 +97,7 @@ export interface SearchRequest {
   longitude: number;
   schoolType: SchoolType;
   radius?: number; // 搜索半径，默认 5000 米
+  studentScore?: number; // 高中搜索时学生分数
 }
 
 /** 搜索响应 */
@@ -95,12 +116,48 @@ export interface SearchResponse {
   message?: string;
 }
 
+/** 登录用户 */
+export interface SessionUser {
+  id: number;
+  email: string;
+  displayName: string;
+}
+
+/** 登录/注册响应 */
+export interface AuthPayload {
+  token: string;
+  user: SessionUser;
+}
+
+/** 留言回复 */
+export interface MessageReply {
+  id: number;
+  messageId: number;
+  userId: number;
+  authorName: string;
+  content: string;
+  createdAt: string;
+}
+
+/** 学校留言 */
+export interface MessageThread {
+  id: number;
+  schoolId: string;
+  schoolName: string;
+  userId: number;
+  authorName: string;
+  content: string;
+  createdAt: string;
+  replies: MessageReply[];
+}
+
 /** 搜索状态 */
 export type SearchStatus =
   | "idle"
   | "selecting-type"
   | "locating"
   | "searching"
+  | "streaming"
   | "success"
   | "error";
 
@@ -150,3 +207,78 @@ export const DIMENSION_LABELS: Record<string, string> = {
   studentActivityScore: "学生活动",
   awardsCount: "获奖荣誉",
 };
+
+// ═══════════════════════════════════════════════════════════
+// 大学报考相关类型
+// ═══════════════════════════════════════════════════════════
+
+/** 大学报考搜索请求 */
+export interface UniversitySearchRequest {
+  studentScore: number;
+  universityNames: string[];
+  preferredMajors?: string[];
+}
+
+/** 单年录取分数线 */
+export interface UniversityAdmissionYear {
+  year: number;
+  minScore: number;
+  avgScore?: number;
+  maxScore?: number;
+  note?: string;
+}
+
+/** 大学基本信息 */
+export interface UniversityInfo {
+  name: string;
+  city?: string;
+  province?: string;
+  level?: string;   // 985 / 211 / 双一流 / 普通本科
+  type?: string;     // 综合 / 理工 / 师范 / 财经 等
+  website?: string;
+}
+
+/** 专业分析信息 */
+export interface MajorAnalysis {
+  majorName: string;
+  category?: string;       // 学科门类
+  rank?: number;           // 学科评估排名
+  level?: string;          // A+ / A / B+ 等
+  description?: string;
+  employmentRate?: number; // 就业率
+  salaryIndex?: number;    // 薪资指数
+  strengths?: string;
+  score: number;           // 综合评分 0-100
+}
+
+/** 大学分析结果 */
+export interface UniversityAnalysis {
+  info: UniversityInfo;
+  admissionScores: UniversityAdmissionYear[];
+  majors: MajorAnalysis[];
+  overallScore: number;
+  admissionMatchScore: number;
+  summary: string;
+}
+
+/** 大学报考排名结果 */
+export interface UniversityRanking {
+  analysis: UniversityAnalysis;
+  rank: number;
+  recommendation: string;
+  isTopPick: boolean;
+  isReachSchool: boolean;    // 冲一冲
+  isMatchSchool: boolean;    // 稳一稳
+  isSafetySchool: boolean;   // 保一保
+  /** 前端流式状态 */
+  analyzing?: boolean;
+}
+
+/** 大学搜索状态 */
+export type UniversitySearchStatus =
+  | "idle"
+  | "inputting"
+  | "searching"
+  | "streaming"
+  | "success"
+  | "error";

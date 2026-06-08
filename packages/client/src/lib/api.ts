@@ -1,11 +1,101 @@
 import type {
+  AuthPayload,
   GeoLocation,
+  MessageReply,
+  MessageThread,
+  School,
+  SchoolAnalysis,
   SchoolRanking,
   SearchRequest,
   SearchResponse,
+  UniversityAnalysis,
+  UniversityRanking,
+  UniversitySearchRequest,
 } from "@/types/school";
 
 const API_BASE = "/api";
+
+function authHeaders(token?: string): HeadersInit {
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
+async function readApiResponse<T>(res: Response, fallback: string): Promise<T> {
+  const json = await res.json();
+  if (!res.ok || !json.success) {
+    throw new Error(json.message || fallback);
+  }
+  return json.data as T;
+}
+
+export async function registerWithEmail(request: {
+  email: string;
+  password: string;
+  displayName: string;
+  verificationCode: string;
+}): Promise<AuthPayload> {
+  const res = await fetch(`${API_BASE}/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readApiResponse<AuthPayload>(res, "注册失败");
+}
+
+export async function sendRegisterCode(email: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/auth/register/code`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email }),
+  });
+  await readApiResponse<object>(res, "验证码发送失败");
+}
+
+export async function loginWithEmail(request: {
+  email: string;
+  password: string;
+}): Promise<AuthPayload> {
+  const res = await fetch(`${API_BASE}/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  return readApiResponse<AuthPayload>(res, "登录失败");
+}
+
+export async function fetchMessages(
+  schoolId?: string,
+): Promise<MessageThread[]> {
+  const params = new URLSearchParams();
+  if (schoolId) params.set("schoolId", schoolId);
+  const query = params.toString();
+  const res = await fetch(`${API_BASE}/messages${query ? `?${query}` : ""}`);
+  return readApiResponse<MessageThread[]>(res, "获取留言失败");
+}
+
+export async function createMessage(
+  token: string,
+  request: { schoolId: string; schoolName: string; content: string },
+): Promise<MessageThread> {
+  const res = await fetch(`${API_BASE}/messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify(request),
+  });
+  return readApiResponse<MessageThread>(res, "发布留言失败");
+}
+
+export async function createMessageReply(
+  token: string,
+  messageId: number,
+  content: string,
+): Promise<MessageReply> {
+  const res = await fetch(`${API_BASE}/messages/${messageId}/replies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ content }),
+  });
+  return readApiResponse<MessageReply>(res, "回复留言失败");
+}
 
 export async function searchSchools(
   request: SearchRequest,
@@ -19,6 +109,126 @@ export async function searchSchools(
     throw new Error(`搜索失败: ${res.statusText}`);
   }
   return res.json();
+}
+
+export async function trackSiteVisit(path: string): Promise<void> {
+  const params = new URLSearchParams({ path });
+  await fetch(`${API_BASE}/analytics/visit?${params.toString()}`, {
+    method: "POST",
+  });
+}
+
+export type SearchStreamEvent =
+  | {
+      type: "meta";
+      location: { address: string; latitude: number; longitude: number };
+      schools: School[];
+      searchRadius: number;
+      totalFound: number;
+    }
+  | {
+      type: "analysis";
+      schoolId: string;
+      analysis: SchoolAnalysis;
+      overallScore: number;
+      admissionMatchScore?: number;
+    }
+  | { type: "done"; rankings: SchoolRanking[]; message?: string }
+  | { type: "error"; message: string };
+
+export async function* searchSchoolsStream(
+  request: SearchRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<SearchStreamEvent, void, unknown> {
+  const res = await fetch(`${API_BASE}/schools/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (!res.ok) {
+    let message = `搜索失败: ${res.statusText}`;
+    try {
+      const json = await res.json();
+      if (json?.message) message = json.message;
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(message);
+  }
+
+  if (!res.body) {
+    throw new Error("浏览器不支持流式响应");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const parseFrame = (frame: string): SearchStreamEvent | null => {
+    let eventName = "message";
+    const dataLines: string[] = [];
+    for (const rawLine of frame.split("\n")) {
+      const line = rawLine.replace(/\r$/, "");
+      if (!line || line.startsWith(":")) continue;
+      const idx = line.indexOf(":");
+      const field = idx === -1 ? line : line.slice(0, idx);
+      let value = idx === -1 ? "" : line.slice(idx + 1);
+      if (value.startsWith(" ")) value = value.slice(1);
+      if (field === "event") eventName = value;
+      else if (field === "data") dataLines.push(value);
+    }
+    if (dataLines.length === 0) return null;
+    try {
+      const data = JSON.parse(dataLines.join("\n"));
+      return { type: eventName, ...data } as SearchStreamEvent;
+    } catch (e) {
+      console.warn("[SSE] 跳过无法解析的帧:", e, dataLines.join("\n"));
+      return null;
+    }
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let sepIndex: number;
+      while (
+        (sepIndex = (() => {
+          const a = buffer.indexOf("\n\n");
+          const b = buffer.indexOf("\r\n\r\n");
+          if (a === -1) return b;
+          if (b === -1) return a;
+          return Math.min(a, b);
+        })()) >= 0
+      ) {
+        const sepLen = buffer.startsWith("\r\n\r\n", sepIndex) ? 4 : 2;
+        const frame = buffer.slice(0, sepIndex);
+        buffer = buffer.slice(sepIndex + sepLen);
+        const event = parseFrame(frame);
+        if (event) yield event;
+      }
+    }
+
+    buffer += decoder.decode();
+    const tail = buffer.trim();
+    if (tail) {
+      const event = parseFrame(tail);
+      if (event) yield event;
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export async function getSchoolDetail(id: string): Promise<SchoolRanking> {
@@ -95,4 +305,150 @@ export async function reverseGeocodeCoords(
     throw new Error(json.message || "逆地理编码失败");
   }
   return json.data.address as string;
+}
+
+export interface NearbyFacility {
+  id: string;
+  name: string;
+  address: string;
+  distance: string;
+  location: string;
+}
+
+export async function fetchNearbyFacilities(
+  latitude: number,
+  longitude: number,
+  type: string,
+  radius?: number,
+): Promise<NearbyFacility[]> {
+  const params = new URLSearchParams({
+    latitude: String(latitude),
+    longitude: String(longitude),
+    type,
+  });
+  if (radius) params.set("radius", String(radius));
+  const res = await fetch(`${API_BASE}/schools/nearby?${params}`);
+  if (!res.ok) {
+    throw new Error(`周边设施查询失败: ${res.statusText}`);
+  }
+  const json = await res.json();
+  if (!json.success) {
+    throw new Error(json.message || "周边设施查询失败");
+  }
+  return json.data;
+}
+
+// ═══════════════════════════════════════════════════════════
+// 大学报考搜索
+// ═══════════════════════════════════════════════════════════
+
+export type UniversitySearchStreamEvent =
+  | {
+      type: "meta";
+      studentScore: number;
+      universityNames: string[];
+      preferredMajors?: string[];
+      totalCount: number;
+    }
+  | {
+      type: "analysis";
+      universityName: string;
+      analysis: UniversityAnalysis;
+    }
+  | { type: "done"; rankings: UniversityRanking[]; message?: string }
+  | { type: "error"; message: string };
+
+export async function* searchUniversitiesStream(
+  request: UniversitySearchRequest,
+  signal?: AbortSignal,
+): AsyncGenerator<UniversitySearchStreamEvent, void, unknown> {
+  const res = await fetch(`${API_BASE}/universities/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+    },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (!res.ok) {
+    let message = `搜索失败: ${res.statusText}`;
+    try {
+      const json = await res.json();
+      if (json?.message) message = json.message;
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(message);
+  }
+
+  if (!res.body) {
+    throw new Error("浏览器不支持流式响应");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  const parseFrame = (frame: string): UniversitySearchStreamEvent | null => {
+    let eventName = "message";
+    const dataLines: string[] = [];
+    for (const rawLine of frame.split("\n")) {
+      const line = rawLine.replace(/\r$/, "");
+      if (!line || line.startsWith(":")) continue;
+      const idx = line.indexOf(":");
+      const field = idx === -1 ? line : line.slice(0, idx);
+      let value = idx === -1 ? "" : line.slice(idx + 1);
+      if (value.startsWith(" ")) value = value.slice(1);
+      if (field === "event") eventName = value;
+      else if (field === "data") dataLines.push(value);
+    }
+    if (dataLines.length === 0) return null;
+    try {
+      const data = JSON.parse(dataLines.join("\n"));
+      return { type: eventName, ...data } as UniversitySearchStreamEvent;
+    } catch (e) {
+      console.warn("[SSE] 跳过无法解析的帧:", e, dataLines.join("\n"));
+      return null;
+    }
+  };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      let sepIndex: number;
+      while (
+        (sepIndex = (() => {
+          const a = buffer.indexOf("\n\n");
+          const b = buffer.indexOf("\r\n\r\n");
+          if (a === -1) return b;
+          if (b === -1) return a;
+          return Math.min(a, b);
+        })()) >= 0
+      ) {
+        const sepLen = buffer.startsWith("\r\n\r\n", sepIndex) ? 4 : 2;
+        const frame = buffer.slice(0, sepIndex);
+        buffer = buffer.slice(sepIndex + sepLen);
+        const event = parseFrame(frame);
+        if (event) yield event;
+      }
+    }
+
+    buffer += decoder.decode();
+    const tail = buffer.trim();
+    if (tail) {
+      const event = parseFrame(tail);
+      if (event) yield event;
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // ignore
+    }
+  }
 }

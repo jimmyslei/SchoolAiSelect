@@ -1,4 +1,5 @@
-import { BookOpen, GraduationCap, School } from "lucide-react";
+import { BookOpen, GraduationCap, School, Trophy } from "lucide-react";
+import { useState } from "react";
 import type { SchoolType } from "@/types/school";
 import { cn } from "@/lib/utils";
 import {
@@ -8,11 +9,12 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RadiusSelector } from "./RadiusSelector";
 
 interface SchoolTypeDialogProps {
   open: boolean;
   onClose: () => void;
-  onSelect: (type: SchoolType) => void;
+  onSelect: (type: SchoolType, radius: number) => void;
 }
 
 const schoolTypes: {
@@ -42,13 +44,22 @@ const schoolTypes: {
     iconWrap: "bg-sky-100 text-sky-500",
   },
   {
-    type: "middle",
-    label: "中学",
+    type: "junior_high",
+    label: "初中",
     icon: School,
     description:
-      "适合 12-18 岁青少年的中等教育阶段，兼顾成绩表现与校园活跃度。",
+      "适合 12-15 岁青少年的初级中等教育阶段，关注师资、升学率与综合成长环境。",
     accent: "hover:border-sage-200 hover:bg-sage-50/70",
     iconWrap: "bg-sage-100 text-sage-500",
+  },
+  {
+    type: "senior_high",
+    label: "高中",
+    icon: Trophy,
+    description:
+      "适合 15-18 岁青少年的高级中等教育阶段，结合历年录取分数线与学生分数智能择校。",
+    accent: "hover:border-gold-200 hover:bg-gold-50/70",
+    iconWrap: "bg-gold-100 text-gold-500",
   },
 ];
 
@@ -57,6 +68,8 @@ export function SchoolTypeDialog({
   onClose,
   onSelect,
 }: SchoolTypeDialogProps) {
+  const [radius, setRadius] = useState(5000);
+
   return (
     <Dialog open={open} onOpenChange={(value) => !value && onClose()}>
       <DialogContent className="gap-0 overflow-hidden p-0">
@@ -74,7 +87,7 @@ export function SchoolTypeDialog({
             <button
               key={item.type}
               type="button"
-              onClick={() => onSelect(item.type)}
+              onClick={() => onSelect(item.type, radius)}
               className={cn(
                 "group flex w-full items-start gap-4 rounded-[26px] border border-border/70 bg-background/70 p-4 text-left transition-all duration-200",
                 item.accent,
@@ -101,6 +114,10 @@ export function SchoolTypeDialog({
               </div>
             </button>
           ))}
+        </div>
+
+        <div className="border-t border-border/70 px-5 py-4 sm:px-6">
+          <RadiusSelector value={radius} onChange={setRadius} />
         </div>
       </DialogContent>
     </Dialog>

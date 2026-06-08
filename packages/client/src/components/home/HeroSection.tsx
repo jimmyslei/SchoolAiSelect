@@ -2,6 +2,7 @@ import { motion } from "framer-motion";
 import {
   ArrowRight,
   Compass,
+  GraduationCap,
   MapPin,
   Sparkles,
   Stars,
@@ -11,6 +12,7 @@ import { Button } from "@/components/ui/button";
 
 interface HeroSectionProps {
   onStart: () => void;
+  onStartUniversity?: () => void;
 }
 
 const metrics = [
@@ -19,7 +21,7 @@ const metrics = [
   { label: "决策方式", value: "AI + 公开信息" },
 ];
 
-export function HeroSection({ onStart }: HeroSectionProps) {
+export function HeroSection({ onStart, onStartUniversity }: HeroSectionProps) {
   return (
     <section
       id="top"
@@ -41,22 +43,22 @@ export function HeroSection({ onStart }: HeroSectionProps) {
         >
           <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-warm-200/80 bg-background/80 px-4 py-2 text-xs font-medium text-warm-700 shadow-xs backdrop-blur-sm">
             <Sparkles className="h-3.5 w-3.5" />
-            AI 驱动的暖感择校体验
+            AI 驱动的智能择校 · 大学报考分析
           </div>
 
           <div className="space-y-6">
             <div className="space-y-4">
               <p className="text-sm font-medium uppercase tracking-[0.28em] text-warm-600">
-                Geo School Match
+                School &amp; University Match
               </p>
               <h1 className="text-balance font-display text-4xl font-semibold leading-tight text-neutral-900 sm:text-5xl lg:text-6xl">
                 从家庭位置出发，
                 <span className="block bg-linear-to-r from-warm-600 via-peach-500 to-gold-400 bg-clip-text text-transparent">
-                  找到更适合孩子的学校。
+                  找到更适合的学校与大学。
                 </span>
               </h1>
               <p className="max-w-xl text-base leading-8 text-neutral-600 sm:text-lg">
-                自动定位、整合公开教育信息、生成多维评分与推荐理由，让择校流程更清晰、更安心，也更容易比较。
+                自动定位、整合公开教育信息、生成多维评分与推荐理由。支持 K-12 学校搜索与高考大学报考分析，让择校更清晰、更安心。
               </p>
             </div>
 
@@ -73,6 +75,17 @@ export function HeroSection({ onStart }: HeroSectionProps) {
                 开始寻找学校
                 <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
               </Button>
+              {onStartUniversity && (
+                <Button
+                  onClick={onStartUniversity}
+                  variant="outline"
+                  size="xl"
+                  className="group border-purple-200 text-purple-700 hover:bg-purple-50 hover:text-purple-800"
+                >
+                  <GraduationCap className="h-4 w-4" />
+                  大学报考分析
+                </Button>
+              )}
               <a
                 href="#workflow"
                 className="inline-flex h-14 items-center justify-center rounded-full border border-border/80 bg-background/70 px-6 text-sm font-medium text-neutral-700 transition-colors hover:bg-accent hover:text-warm-700"

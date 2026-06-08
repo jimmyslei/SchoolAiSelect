@@ -14,6 +14,7 @@ import {
 import type { SchoolRanking } from "@/types/school";
 import { SchoolTypeLabels } from "@/types/school";
 import { SchoolRadarChart } from "./RadarChart";
+import { NearbyFacilities } from "./NearbyFacilities";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -153,6 +154,43 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
         </div>
       )}
 
+      {/* 周边生活设施 */}
+      <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm p-6 mb-4">
+        <NearbyFacilities
+          latitude={school.latitude}
+          longitude={school.longitude}
+          schoolName={school.name}
+        />
+      </div>
+
+      {/* 高中录取分数线 */}
+      {analysis.admissionCutoffScores && (
+        <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm p-6 mb-4">
+          <h3 className="font-semibold text-neutral-800 mb-3 flex items-center gap-2">
+            <Award className="w-4 h-4 text-gold-500" />
+            历年录取分数线
+            {ranking.admissionMatchScore !== undefined &&
+              ranking.admissionMatchScore !== null && (
+                <span
+                  className={cn(
+                    "ml-auto text-sm font-medium px-2.5 py-0.5 rounded-full",
+                    ranking.admissionMatchScore >= 80
+                      ? "bg-sage-100 text-sage-700"
+                      : ranking.admissionMatchScore >= 60
+                        ? "bg-gold-50 text-gold-700"
+                        : ranking.admissionMatchScore >= 40
+                          ? "bg-warm-50 text-warm-700"
+                          : "bg-red-50 text-red-600",
+                  )}
+                >
+                  录取匹配 {ranking.admissionMatchScore}分
+                </span>
+              )}
+          </h3>
+          <AdmissionCutoffTable cutoffsJson={analysis.admissionCutoffScores} />
+        </div>
+      )}
+
       {/* 信息来源 */}
       {analysis.sources.length > 0 && (
         <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm p-6 mb-8">
@@ -244,6 +282,49 @@ function DetailItem({
       </div>
       <Progress value={score} className="h-2" />
       <p className="text-xs text-neutral-400">{description}</p>
+    </div>
+  );
+}
+
+function AdmissionCutoffTable({ cutoffsJson }: { cutoffsJson: string }) {
+  let entries: { year: number; score: number }[] = [];
+  try {
+    entries = JSON.parse(cutoffsJson)
+      .filter((e: { year: number; score: number }) => e.score > 0)
+      .sort((a: { year: number }, b: { year: number }) => b.year - a.year);
+  } catch {
+    return <p className="text-sm text-neutral-400">录取分数线数据暂无法解析</p>;
+  }
+
+  if (entries.length === 0) {
+    return <p className="text-sm text-neutral-400">暂无有效录取分数线数据</p>;
+  }
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-neutral-100">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-neutral-50 text-neutral-500">
+            <th className="px-4 py-2.5 text-left font-medium">年份</th>
+            <th className="px-4 py-2.5 text-right font-medium">录取分数线</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map((entry, i) => (
+            <tr
+              key={entry.year}
+              className={i % 2 === 0 ? "bg-white" : "bg-neutral-50/50"}
+            >
+              <td className="px-4 py-2.5 text-neutral-700 font-medium">
+                {entry.year} 年
+              </td>
+              <td className="px-4 py-2.5 text-right font-bold text-warm-600">
+                {entry.score} 分
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

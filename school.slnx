@@ -1,0 +1,14 @@
+<Solution>
+  <Configurations>
+    <Platform Name="Any CPU" />
+    <Platform Name="x64" />
+    <Platform Name="x86" />
+  </Configurations>
+  <Folder Name="/packages/" />
+  <Folder Name="/packages/server/">
+    <Project Path="packages/server/SchoolRecommender.Api.csproj" />
+  </Folder>
+  <Folder Name="/packages/server/tests/">
+    <Project Path="packages/server/tests/SchoolRecommender.Api.Tests/SchoolRecommender.Api.Tests.csproj" />
+  </Folder>
+</Solution>

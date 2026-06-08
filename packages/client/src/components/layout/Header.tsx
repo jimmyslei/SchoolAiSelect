@@ -3,9 +3,14 @@ import { GraduationCap, Menu, Sparkles, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { ThemeToggle } from "@/components/shared/ThemeToggle";
+import type { SessionUser } from "@/types/school";
 
 interface HeaderProps {
   className?: string;
+  user?: SessionUser | null;
+  onAuthClick?: () => void;
+  onLogout?: () => void;
 }
 
 const navItems = [
@@ -14,7 +19,12 @@ const navItems = [
   { href: "#about", label: "数据说明" },
 ];
 
-export function Header({ className }: HeaderProps) {
+export function Header({
+  className,
+  user,
+  onAuthClick,
+  onLogout,
+}: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
@@ -53,6 +63,28 @@ export function Header({ className }: HeaderProps) {
           </nav>
 
           <div className="hidden items-center gap-3 md:flex">
+            <ThemeToggle />
+            {user ? (
+              <div className="flex items-center gap-2 rounded-full bg-sage-100 px-3 py-1.5 text-xs font-medium text-sage-700">
+                <span>{user.displayName}</span>
+                <button
+                  type="button"
+                  onClick={onLogout}
+                  className="text-sage-600 hover:text-warm-700"
+                >
+                  退出
+                </button>
+              </div>
+            ) : (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={onAuthClick}
+              >
+                登录 / 注册
+              </Button>
+            )}
             <div className="flex items-center gap-2 rounded-full bg-warm-100 px-3 py-1.5 text-xs font-medium text-warm-700">
               <Sparkles className="h-3.5 w-3.5" />
               AI 多源分析
@@ -98,7 +130,34 @@ export function Header({ className }: HeaderProps) {
                     {item.label}
                   </a>
                 ))}
-                <Button asChild variant="warm" className="mt-3 w-full">
+                <div className="flex items-center justify-center py-2">
+                  <ThemeToggle />
+                </div>
+                {user ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onLogout?.();
+                      setMobileMenuOpen(false);
+                    }}
+                    className="rounded-2xl px-4 py-3 text-sm text-neutral-700 transition-colors hover:bg-accent hover:text-warm-700"
+                  >
+                    {user.displayName} · 退出登录
+                  </button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-1 w-full"
+                    onClick={() => {
+                      onAuthClick?.();
+                      setMobileMenuOpen(false);
+                    }}
+                  >
+                    登录 / 注册
+                  </Button>
+                )}
+                <Button asChild variant="warm" className="mt-1 w-full">
                   <a
                     href="#hero-start"
                     onClick={() => setMobileMenuOpen(false)}
