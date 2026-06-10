@@ -233,22 +233,22 @@ export interface UniversityInfo {
   name: string;
   city?: string;
   province?: string;
-  level?: string;   // 985 / 211 / 双一流 / 普通本科
-  type?: string;     // 综合 / 理工 / 师范 / 财经 等
+  level?: string; // 985 / 211 / 双一流 / 普通本科
+  type?: string; // 综合 / 理工 / 师范 / 财经 等
   website?: string;
 }
 
 /** 专业分析信息 */
 export interface MajorAnalysis {
   majorName: string;
-  category?: string;       // 学科门类
-  rank?: number;           // 学科评估排名
-  level?: string;          // A+ / A / B+ 等
+  category?: string; // 学科门类
+  rank?: number; // 学科评估排名
+  level?: string; // A+ / A / B+ 等
   description?: string;
   employmentRate?: number; // 就业率
-  salaryIndex?: number;    // 薪资指数
+  salaryIndex?: number; // 薪资指数
   strengths?: string;
-  score: number;           // 综合评分 0-100
+  score: number; // 综合评分 0-100
 }
 
 /** 大学分析结果 */
@@ -267,15 +267,80 @@ export interface UniversityRanking {
   rank: number;
   recommendation: string;
   isTopPick: boolean;
-  isReachSchool: boolean;    // 冲一冲
-  isMatchSchool: boolean;    // 稳一稳
-  isSafetySchool: boolean;   // 保一保
+  isReachSchool: boolean; // 冲一冲
+  isMatchSchool: boolean; // 稳一稳
+  isSafetySchool: boolean; // 保一保
   /** 前端流式状态 */
   analyzing?: boolean;
 }
 
 /** 大学搜索状态 */
 export type UniversitySearchStatus =
+  | "idle"
+  | "inputting"
+  | "searching"
+  | "streaming"
+  | "success"
+  | "error";
+
+// ═══════════════════════════════════════════════════════════
+// 高中择校推荐（按省份 + 分数，冲/稳/保）
+// ═══════════════════════════════════════════════════════════
+
+/** 高中择校推荐请求 */
+export interface HighSchoolRecommendRequest {
+  studentScore: number;
+  province: string;
+}
+
+/** 高中单年录取分数线 */
+export interface HighSchoolAdmissionYear {
+  year: number;
+  score: number;
+}
+
+/** 高中择校推荐项 */
+export interface HighSchoolRecommendation {
+  schoolName: string;
+  city?: string;
+  admissionScores: HighSchoolAdmissionYear[];
+  /** "冲" | "稳" | "保" */
+  category: string;
+  /** 录取匹配分 0-100 */
+  matchScore: number;
+  /** 近年平均录取线 */
+  avgAdmissionScore: number;
+  /** 推荐理由 */
+  recommendation: string;
+  // ── 扩展信息 ──
+  /** 学校级别：省级示范 / 市级重点 / 省重点 等 */
+  schoolLevel?: string;
+  /** 办学性质：公办 / 民办 */
+  schoolNature?: string;
+  /** 学校特色 */
+  schoolFeatures?: string;
+  /** 师资概况 */
+  teachingStaffInfo?: string;
+  /** 优势学科 */
+  keyDisciplines?: string;
+  /** 在校学生规模 */
+  studentCount?: number;
+  /** 学校详细地址 */
+  address?: string;
+  /** 学校官网 */
+  website?: string;
+  /** 招生计划人数 */
+  enrollmentPlan?: number;
+  /** 招生备注 */
+  enrollmentNote?: string;
+  /** 近年最低录取线 */
+  minAdmissionScore: number;
+  /** 近年最高录取线 */
+  maxAdmissionScore: number;
+}
+
+/** 高中推荐搜索状态 */
+export type HighSchoolRecommendStatus =
   | "idle"
   | "inputting"
   | "searching"

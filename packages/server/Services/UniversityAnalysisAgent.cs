@@ -169,7 +169,7 @@ public sealed class UniversityAnalysisAgent
 - majors：如果用户指定了意向专业则分析这些专业，否则分析该校 3-5 个优势/热门专业
 - overallScore：综合学科实力、就业前景等因素给出 0-100 分
 - admissionMatchScore：根据学生分数与历年录取线的差距评估录取概率 (0-100)，100 表示稳上
-- summary：100 字以内的综合评价
+- summary：300 字以内的综合评价
 """;
 
         try

@@ -121,10 +121,10 @@ export function UniversitySearchDialog({
       exit={{ opacity: 0, y: -20 }}
       className="mx-auto max-w-2xl"
     >
-      <div className="rounded-2xl border border-warm-200/60 bg-white/90 p-6 shadow-lg backdrop-blur-sm sm:p-8">
+      <div className="rounded-2xl border border-warm-200/50 bg-gradient-to-br from-white/95 to-warm-50/30 p-6 shadow-lg backdrop-blur-sm sm:p-8">
         {/* Header */}
         <div className="mb-6 flex items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-purple-100 to-blue-100">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-purple-100 to-blue-100 shadow-sm">
             <GraduationCap className="h-6 w-6 text-purple-600" />
           </div>
           <div>

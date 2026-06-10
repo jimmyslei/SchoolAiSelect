@@ -1,10 +1,20 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.RegularExpressions;
+using System.Net;
 
 namespace SchoolRecommender.Api.Services;
 
 internal static class FunctionCallArgumentNormalization
 {
+    private static readonly Regex MimoToolCallRegex = new(
+        @"<tool_call>\s*<function\s*=\s*(?<name>[^>\s]+)\s*>\s*(?<body>[\s\S]*?)\s*</function>\s*</tool_call>",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
+    private static readonly Regex MimoParameterRegex = new(
+        @"<parameter\s*=\s*(?<name>[^>\s]+)\s*>\s*(?<value>[\s\S]*?)\s*</parameter>",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+
     public static Dictionary<string, object?>? TryNormalizeArguments(
         string? functionName,
         IDictionary<string, object?>? arguments,
@@ -66,6 +76,41 @@ internal static class FunctionCallArgumentNormalization
     {
         var normalized = TryNormalizeRawJson(functionName, raw, existingArguments: null);
         return normalized is null ? null : JsonSerializer.Serialize(normalized);
+    }
+
+    public static (string FunctionName, Dictionary<string, object?> Arguments)? TryParseMimoToolCall(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return null;
+        }
+
+        var toolCallMatch = MimoToolCallRegex.Match(text);
+        if (!toolCallMatch.Success)
+        {
+            return null;
+        }
+
+        var functionName = toolCallMatch.Groups["name"].Value.Trim();
+        if (string.IsNullOrWhiteSpace(functionName))
+        {
+            return null;
+        }
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        var body = toolCallMatch.Groups["body"].Value;
+        foreach (Match parameterMatch in MimoParameterRegex.Matches(body))
+        {
+            var parameterName = parameterMatch.Groups["name"].Value.Trim();
+            if (string.IsNullOrWhiteSpace(parameterName))
+            {
+                continue;
+            }
+
+            arguments[parameterName] = WebUtility.HtmlDecode(parameterMatch.Groups["value"].Value.Trim());
+        }
+
+        return arguments.Count == 0 ? null : (functionName, arguments);
     }
 
     private static Dictionary<string, object?>? TryNormalizeArgumentValue(

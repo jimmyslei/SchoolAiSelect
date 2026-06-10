@@ -87,18 +87,18 @@ export function SchoolCard({
       }
       onClick={analyzing ? undefined : compareMode ? undefined : onClick}
       className={cn(
-        "relative p-5 rounded-2xl bg-white border transition-all duration-200",
+        "relative p-5 rounded-2xl bg-gradient-to-br from-white to-warm-50/30 border transition-all duration-300 backdrop-blur-sm",
         analyzing
           ? "border-warm-100 shadow-sm cursor-wait opacity-90"
           : compareMode
             ? "cursor-pointer"
             : "cursor-pointer",
         !analyzing && rank === 1 && !compareMode
-          ? "border-gold-200 shadow-md"
+          ? "border-gold-200/80 shadow-lg"
           : !analyzing
             ? isSelected
-              ? "border-warm-300 shadow-md ring-2 ring-warm-200"
-              : "border-neutral-100 shadow-sm hover:border-warm-200"
+              ? "border-warm-300 shadow-md ring-2 ring-warm-200/50"
+              : "border-neutral-100/60 shadow-sm hover:border-warm-200/70 hover:shadow-md"
             : "",
       )}
     >

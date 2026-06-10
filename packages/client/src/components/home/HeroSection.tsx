@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 interface HeroSectionProps {
   onStart: () => void;
   onStartUniversity?: () => void;
+  onStartHighSchoolRecommend?: () => void;
 }
 
 const metrics = [
@@ -21,17 +22,31 @@ const metrics = [
   { label: "决策方式", value: "AI + 公开信息" },
 ];
 
-export function HeroSection({ onStart, onStartUniversity }: HeroSectionProps) {
+export function HeroSection({
+  onStart,
+  onStartUniversity,
+  onStartHighSchoolRecommend,
+}: HeroSectionProps) {
   return (
     <section
       id="top"
-      className="relative overflow-hidden px-4 pb-16 pt-28 sm:px-6 sm:pb-20 lg:px-8"
+      className="relative overflow-hidden px-4 pb-20 pt-28 sm:px-6 sm:pb-24 lg:px-8"
     >
       <div className="absolute inset-0 -z-10">
-        <div className="absolute inset-x-0 top-0 h-[560px] bg-linear-to-b from-peach-100/70 via-warm-50 to-transparent" />
-        <div className="absolute left-[-8%] top-24 h-72 w-72 rounded-full bg-peach-200/45 blur-3xl" />
-        <div className="absolute right-[-6%] top-16 h-80 w-80 rounded-full bg-gold-100/60 blur-3xl" />
-        <div className="absolute bottom-0 left-1/2 h-64 w-[70%] -translate-x-1/2 rounded-full bg-sand-200/35 blur-3xl" />
+        <div className="absolute inset-x-0 top-0 h-[600px] bg-linear-to-b from-peach-100/70 via-warm-50 to-transparent" />
+        <div className="absolute left-[-8%] top-24 h-80 w-80 rounded-full bg-peach-200/50 blur-[80px]" />
+        <div className="absolute right-[-4%] top-12 h-96 w-96 rounded-full bg-gold-100/60 blur-[90px]" />
+        <div className="absolute bottom-0 left-1/2 h-72 w-[75%] -translate-x-1/2 rounded-full bg-sand-200/40 blur-[80px]" />
+        {/* Animated floating shapes */}
+        <div className="animate-float-soft absolute left-[12%] top-[40%] h-3 w-3 rounded-full bg-warm-400/30" />
+        <div
+          className="animate-float-soft absolute right-[18%] top-[30%] h-2 w-2 rounded-full bg-peach-400/25"
+          style={{ animationDelay: "1.5s" }}
+        />
+        <div
+          className="animate-float-soft absolute left-[65%] top-[55%] h-4 w-4 rounded-full bg-gold-300/20"
+          style={{ animationDelay: "3s" }}
+        />
       </div>
 
       <div className="mx-auto grid max-w-6xl gap-10 lg:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] lg:items-center">
@@ -41,8 +56,11 @@ export function HeroSection({ onStart, onStartUniversity }: HeroSectionProps) {
           transition={{ duration: 0.7, ease: "easeOut" }}
           className="max-w-2xl"
         >
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-warm-200/80 bg-background/80 px-4 py-2 text-xs font-medium text-warm-700 shadow-xs backdrop-blur-sm">
-            <Sparkles className="h-3.5 w-3.5" />
+          <div className="mb-7 inline-flex items-center gap-2.5 rounded-full border border-warm-200/70 bg-background/80 px-4 py-2 text-xs font-medium text-warm-700 shadow-xs backdrop-blur-sm">
+            <span className="relative flex h-2 w-2">
+              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-warm-400 opacity-75" />
+              <span className="relative inline-flex h-2 w-2 rounded-full bg-warm-500" />
+            </span>
             AI 驱动的智能择校 · 大学报考分析
           </div>
 
@@ -51,14 +69,15 @@ export function HeroSection({ onStart, onStartUniversity }: HeroSectionProps) {
               <p className="text-sm font-medium uppercase tracking-[0.28em] text-warm-600">
                 School &amp; University Match
               </p>
-              <h1 className="text-balance font-display text-4xl font-semibold leading-tight text-neutral-900 sm:text-5xl lg:text-6xl">
+              <h1 className="text-balance font-display text-4xl font-bold leading-[1.1] tracking-tight text-neutral-900 sm:text-5xl lg:text-[3.5rem]">
                 从家庭位置出发，
                 <span className="block bg-linear-to-r from-warm-600 via-peach-500 to-gold-400 bg-clip-text text-transparent">
-                  找到更适合的学校与大学。
+                  找到更适合的学校与大学
                 </span>
               </h1>
-              <p className="max-w-xl text-base leading-8 text-neutral-600 sm:text-lg">
-                自动定位、整合公开教育信息、生成多维评分与推荐理由。支持 K-12 学校搜索与高考大学报考分析，让择校更清晰、更安心。
+              <p className="max-w-xl text-base leading-8 text-neutral-500 sm:text-lg">
+                自动定位、整合公开教育信息、生成多维评分与推荐理由。支持 K-12
+                学校搜索与高考大学报考分析，让择校更清晰、更安心。
               </p>
             </div>
 
@@ -86,27 +105,41 @@ export function HeroSection({ onStart, onStartUniversity }: HeroSectionProps) {
                   大学报考分析
                 </Button>
               )}
-              <a
+              {onStartHighSchoolRecommend && (
+                <Button
+                  onClick={onStartHighSchoolRecommend}
+                  variant="outline"
+                  size="xl"
+                  className="group border-green-200 text-green-700 hover:bg-green-50 hover:text-green-800"
+                >
+                  <GraduationCap className="h-4 w-4" />
+                  高中择校推荐
+                </Button>
+              )}
+              {/* <a
                 href="#workflow"
                 className="inline-flex h-14 items-center justify-center rounded-full border border-border/80 bg-background/70 px-6 text-sm font-medium text-neutral-700 transition-colors hover:bg-accent hover:text-warm-700"
               >
                 查看流程说明
-              </a>
+              </a> */}
             </div>
 
-            <div className="grid gap-3 pt-4 sm:grid-cols-3">
-              {metrics.map((item) => (
-                <div
+            <div className="grid gap-3 pt-6 sm:grid-cols-3">
+              {metrics.map((item, idx) => (
+                <motion.div
                   key={item.label}
-                  className="rounded-[24px] border border-border/70 bg-background/70 px-4 py-4 backdrop-blur-sm"
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.4, delay: 0.6 + idx * 0.1 }}
+                  className="group rounded-[20px] border border-border/50 bg-background/60 px-4 py-4 backdrop-blur-sm transition-all duration-200 hover:border-warm-200/70 hover:shadow-sm"
                 >
-                  <div className="text-2xl font-semibold text-neutral-900">
+                  <div className="tabular-nums text-2xl font-semibold text-neutral-900">
                     {item.value}
                   </div>
-                  <div className="mt-1 text-xs text-neutral-500">
+                  <div className="mt-1 text-xs text-neutral-400">
                     {item.label}
                   </div>
-                </div>
+                </motion.div>
               ))}
             </div>
           </div>
@@ -118,12 +151,14 @@ export function HeroSection({ onStart, onStartUniversity }: HeroSectionProps) {
           transition={{ duration: 0.8, delay: 0.1, ease: "easeOut" }}
           className="relative"
         >
-          <div className="surface-elevated warm-grid relative overflow-hidden rounded-[36px] p-5 sm:p-6">
-            <div className="absolute right-5 top-5 rounded-full bg-background/80 px-3 py-1 text-xs font-medium text-warm-700">
+          <div className="relative overflow-hidden rounded-[36px] border border-border/40 bg-gradient-to-br from-background/95 via-warm-50/30 to-peach-50/20 p-5 shadow-lg backdrop-blur-sm sm:p-6">
+            {/* Grid pattern overlay */}
+            <div className="warm-grid pointer-events-none absolute inset-0 opacity-60" />
+            <div className="absolute right-5 top-5 rounded-full border border-warm-200/50 bg-background/80 px-3 py-1 text-xs font-medium text-warm-700 backdrop-blur-sm">
               实时生成推荐结果
             </div>
 
-            <div className="rounded-[28px] bg-[linear-gradient(180deg,rgba(255,248,241,0.96),rgba(255,252,247,0.92))] p-5 sm:p-6">
+            <div className="relative rounded-[28px] border border-border/30 bg-gradient-to-br from-background/90 to-warm-50/40 p-5 backdrop-blur-sm sm:p-6">
               <div className="flex items-start justify-between gap-4">
                 <div>
                   <p className="text-sm font-medium text-neutral-500">

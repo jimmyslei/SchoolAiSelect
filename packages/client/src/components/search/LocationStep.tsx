@@ -37,7 +37,7 @@ export function LocationStep({
     <motion.section
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
-      className="surface-elevated mx-auto max-w-3xl rounded-[32px] p-6 sm:p-8"
+      className="mx-auto max-w-3xl overflow-hidden rounded-[32px] border border-border/40 bg-gradient-to-br from-background via-warm-50/20 to-peach-50/10 p-6 shadow-lg backdrop-blur-sm sm:p-8"
     >
       <div className="grid gap-8 lg:grid-cols-[0.9fr_1.1fr] lg:items-center">
         <div className="space-y-4">
@@ -57,10 +57,10 @@ export function LocationStep({
           </div>
         </div>
 
-        <div className="surface-panel rounded-[28px] p-5 sm:p-6">
+        <div className="overflow-hidden rounded-[28px] border border-border/30 bg-gradient-to-br from-warm-50/40 to-peach-50/20 p-5 backdrop-blur-sm sm:p-6">
           {isRequesting && (
             <div className="flex flex-col items-center text-center">
-              <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-warm-100">
+              <div className="relative mb-6 flex h-24 w-24 items-center justify-center rounded-full bg-gradient-to-br from-warm-100 to-peach-100/60 shadow-sm">
                 <motion.div
                   animate={{ scale: [1, 1.45, 1], opacity: [0.35, 0, 0.35] }}
                   transition={{ duration: 2.2, repeat: Infinity }}

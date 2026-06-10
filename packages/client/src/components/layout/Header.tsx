@@ -50,12 +50,12 @@ export function Header({
             </div>
           </a>
 
-          <nav className="hidden items-center gap-1 md:flex">
+          <nav className="hidden items-center gap-0.5 md:flex">
             {navItems.map((item) => (
               <a
                 key={item.href}
                 href={item.href}
-                className="rounded-full px-4 py-2 text-sm text-neutral-600 transition-colors hover:bg-accent hover:text-warm-700"
+                className="relative rounded-full px-4 py-2 text-sm text-neutral-600 transition-all duration-200 hover:bg-warm-50 hover:text-warm-700"
               >
                 {item.label}
               </a>
@@ -85,7 +85,7 @@ export function Header({
                 登录 / 注册
               </Button>
             )}
-            <div className="flex items-center gap-2 rounded-full bg-warm-100 px-3 py-1.5 text-xs font-medium text-warm-700">
+            <div className="flex items-center gap-2 rounded-full border border-warm-200/50 bg-warm-50/80 px-3 py-1.5 text-xs font-medium text-warm-600">
               <Sparkles className="h-3.5 w-3.5" />
               AI 多源分析
             </div>

@@ -96,7 +96,7 @@
     "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
   --font-display:
-    "Inter", "Noto Sans SC", -apple-system, BlinkMacSystemFont, sans-serif;
+    "Outfit", "Noto Sans SC", -apple-system, BlinkMacSystemFont, sans-serif;
 }
 
 /* 暗色模式变量 */
@@ -456,6 +456,95 @@ svg {
   );
   background-size: 200% 100%;
   animation: shimmer 2.2s linear infinite;
+}
+
+/* Grain / noise overlay */
+.grain::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  opacity: 0.028;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 180px;
+}
+
+:root.dark .grain::before {
+  opacity: 0.045;
+}
+
+/* Tabular figures for data */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Decorative section separator */
+.section-divider {
+  position: relative;
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    var(--warm-200),
+    var(--peach-200),
+    var(--warm-200),
+    transparent
+  );
+  opacity: 0.5;
+}
+
+:root.dark .section-divider {
+  opacity: 0.2;
+}
+
+/* Floating decorative dot grid */
+.dot-grid {
+  background-image: radial-gradient(
+    circle,
+    rgba(127, 111, 95, 0.12) 1px,
+    transparent 1px
+  );
+  background-size: 24px 24px;
+}
+
+:root.dark .dot-grid {
+  background-image: radial-gradient(
+    circle,
+    rgba(210, 198, 183, 0.08) 1px,
+    transparent 1px
+  );
+}
+
+/* Stagger animation utility */
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.6s ease-out both;
+}
+
+.animate-float-soft {
+  animation: floatSoft 6s ease-in-out infinite;
+}
+
+@keyframes floatSoft {
+  0%,
+  100% {
+    transform: translateY(0px);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
 }
 
 @media (max-width: 768px) {

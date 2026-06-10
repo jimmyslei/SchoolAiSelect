@@ -12,8 +12,10 @@ import { ScoreInputDialog } from "@/components/search/ScoreInputDialog";
 import { LocationStep } from "@/components/search/LocationStep";
 import { SearchingView } from "@/components/search/SearchingView";
 import { UniversitySearchDialog } from "@/components/search/UniversitySearchDialog";
+import { HighSchoolRecommendDialog } from "@/components/search/HighSchoolRecommendDialog";
 import { SchoolRankingList } from "@/components/results/SchoolRanking";
 import { UniversityRankingList } from "@/components/results/UniversityRanking";
+import { HighSchoolRecommendRanking } from "@/components/results/HighSchoolRecommendRanking";
 import { ComparisonBarChart } from "@/components/results/BarChart";
 import { StepIndicator } from "@/components/shared/StepIndicator";
 import { ShareButton } from "@/components/shared/ShareButton";
@@ -25,6 +27,7 @@ import { useGeolocation } from "@/hooks/useGeolocation";
 import { useSchoolSearch } from "@/hooks/useSchoolSearch";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useUniversitySearch } from "@/hooks/useUniversitySearch";
+import { useHighSchoolRecommend } from "@/hooks/useHighSchoolRecommend";
 import type { SearchHistoryItem } from "@/hooks/useSearchHistory";
 import type { SchoolType } from "@/types/school";
 import { SchoolTypeLabels } from "@/types/school";
@@ -87,8 +90,9 @@ function clearSearchParamsInURL() {
 
 const STEPS = ["选择类型", "获取位置", "搜索分析", "查看结果"];
 const UNI_STEPS = ["填写信息", "AI 分析", "查看排名"];
+const HS_STEPS = ["填写信息", "AI 分析", "查看推荐"];
 
-type SearchMode = "school" | "university";
+type SearchMode = "school" | "university" | "highschool";
 
 export function HomePage() {
   const [showTypeDialog, setShowTypeDialog] = useState(false);
@@ -139,9 +143,31 @@ export function HomePage() {
     reset: uniReset,
   } = useUniversitySearch();
 
+  // 高中择校推荐
+  const {
+    status: hsStatus,
+    recommendations: hsRecommendations,
+    error: hsError,
+    studentScore: hsStudentScore,
+    province: hsProvince,
+    search: hsSearch,
+    reset: hsReset,
+  } = useHighSchoolRecommend();
+  const [hsStep, setHsStep] = useState(-1); // -1=not started, 0=input, 1=searching, 2=done
+
   const handleStart = useCallback(() => {
+    if (!auth.isAuthenticated) {
+      setAuthDialogOpen(true);
+      return;
+    }
     setShowTypeDialog(true);
-  }, []);
+  }, [auth.isAuthenticated]);
+
+  /** 搜索接口返回 401 时清除登录状态并弹出登录框 */
+  const handleAuthError = useCallback(() => {
+    auth.clearAuth();
+    setAuthDialogOpen(true);
+  }, [auth.clearAuth]);
 
   const { history, addHistory, removeHistory, clearHistory } =
     useSearchHistory();
@@ -161,6 +187,11 @@ export function HomePage() {
     if (restoredFromURL.current) return;
     const urlParams = parseSearchParamsFromURL();
     if (urlParams) {
+      // 未登录时弹出登录框，不启动搜索
+      if (!auth.isAuthenticated) {
+        setAuthDialogOpen(true);
+        return;
+      }
       restoredFromURL.current = true;
       setSelectedType(urlParams.type);
       setSelectedRadius(urlParams.radius);
@@ -177,9 +208,11 @@ export function HomePage() {
         undefined,
         urlParams.radius,
         urlParams.studentScore,
+        auth.token ?? undefined,
+        handleAuthError,
       );
     }
-  }, [search]);
+  }, [search, auth.isAuthenticated, auth.token, handleAuthError]);
 
   const handleTypeSelect = useCallback(
     (type: SchoolType, radius: number) => {
@@ -227,10 +260,26 @@ export function HomePage() {
       if (selectedType) {
         searchCoordsRef.current = { latitude: lat, longitude: lng };
         setCurrentStep(2);
-        search(lat, lng, selectedType, address, selectedRadius, studentScore);
+        search(
+          lat,
+          lng,
+          selectedType,
+          address,
+          selectedRadius,
+          studentScore,
+          auth.token ?? undefined,
+          handleAuthError,
+        );
       }
     },
-    [selectedType, search, selectedRadius, studentScore],
+    [
+      selectedType,
+      search,
+      selectedRadius,
+      studentScore,
+      auth.token,
+      handleAuthError,
+    ],
   );
 
   const handleManualInput = useCallback(
@@ -256,6 +305,8 @@ export function HomePage() {
           geo.address || address,
           selectedRadius,
           studentScore,
+          auth.token ?? undefined,
+          handleAuthError,
         );
       } catch {
         searchCoordsRef.current = { latitude: 39.9042, longitude: 116.4074 };
@@ -268,10 +319,20 @@ export function HomePage() {
           address,
           selectedRadius,
           studentScore,
+          auth.token ?? undefined,
+          handleAuthError,
         );
       }
     },
-    [selectedType, search, setManualLocation, selectedRadius, studentScore],
+    [
+      selectedType,
+      search,
+      setManualLocation,
+      selectedRadius,
+      studentScore,
+      auth.token,
+      handleAuthError,
+    ],
   );
 
   const prevGeoStatusRef = useRef<string>("idle");
@@ -380,33 +441,37 @@ export function HomePage() {
         item.address,
         item.radius,
         item.studentScore,
+        auth.token ?? undefined,
+        handleAuthError,
       );
     },
-    [search],
+    [search, auth.token, handleAuthError],
   );
 
   // ─── 大学报考模式处理 ───────────────────────────────────
 
   const handleStartUniversity = useCallback(() => {
+    if (!auth.isAuthenticated) {
+      setAuthDialogOpen(true);
+      return;
+    }
     setSearchMode("university");
     setUniStep(0);
-  }, []);
+  }, [auth.isAuthenticated]);
 
   const handleUniversityConfirm = useCallback(
-    (
-      score: number,
-      universityNames: string[],
-      preferredMajors: string[],
-    ) => {
+    (score: number, universityNames: string[], preferredMajors: string[]) => {
       setUniStudentScore(score);
       setUniStep(1);
       uniSearch(
         score,
         universityNames,
         preferredMajors.length > 0 ? preferredMajors : undefined,
+        auth.token ?? undefined,
+        handleAuthError,
       );
     },
-    [uniSearch],
+    [uniSearch, auth.token, handleAuthError],
   );
 
   const handleUniversityCancel = useCallback(() => {
@@ -427,11 +492,49 @@ export function HomePage() {
     }
   }, [uniStatus]);
 
+  // ─── 高中择校推荐处理 ───────────────────────────────────
+
+  const handleStartHighSchoolRecommend = useCallback(() => {
+    if (!auth.isAuthenticated) {
+      setAuthDialogOpen(true);
+      return;
+    }
+    setSearchMode("highschool");
+    setHsStep(0);
+  }, [auth.isAuthenticated]);
+
+  const handleHighSchoolConfirm = useCallback(
+    (score: number, province: string) => {
+      setHsStep(1);
+      hsSearch(score, province, auth.token ?? undefined, handleAuthError);
+    },
+    [hsSearch, auth.token, handleAuthError],
+  );
+
+  const handleHighSchoolCancel = useCallback(() => {
+    hsReset();
+    setSearchMode("school");
+    setHsStep(-1);
+  }, [hsReset]);
+
+  const handleHighSchoolReset = useCallback(() => {
+    hsReset();
+    setHsStep(0);
+  }, [hsReset]);
+
+  // 高中推荐完成后自动切换步骤
+  useEffect(() => {
+    if (hsStatus === "success" || hsStatus === "error") {
+      setHsStep(2);
+    }
+  }, [hsStatus]);
+
   const isInFlow = currentStep >= 0;
   const isInUniFlow = uniStep >= 0;
+  const isInHsFlow = hsStep >= 0;
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
+    <div className="grain min-h-screen bg-background text-foreground">
       <Header
         user={auth.user}
         onAuthClick={() => setAuthDialogOpen(true)}
@@ -439,12 +542,14 @@ export function HomePage() {
       />
 
       <main className="pb-10 pt-24 sm:pt-28">
-        {!isInFlow && !isInUniFlow && (
+        {!isInFlow && !isInUniFlow && !isInHsFlow && (
           <>
             <HeroSection
               onStart={handleStart}
               onStartUniversity={handleStartUniversity}
+              onStartHighSchoolRecommend={handleStartHighSchoolRecommend}
             />
+            <div className="section-divider mx-auto max-w-4xl" />
             <SearchHistoryCard
               history={history}
               onReplay={handleReplayHistory}
@@ -452,6 +557,7 @@ export function HomePage() {
               onClear={clearHistory}
             />
             <FeaturesSection />
+            <div className="section-divider mx-auto max-w-4xl" />
             <ValueSection />
           </>
         )}
@@ -632,6 +738,83 @@ export function HomePage() {
             </div>
           </section>
         )}
+
+        {/* ─── 高中择校推荐流程 ─── */}
+        {isInHsFlow && searchMode === "highschool" && (
+          <section className="px-4 py-6 sm:px-6 lg:px-8">
+            <div className="mx-auto max-w-4xl space-y-6">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-medium uppercase tracking-[0.24em] text-green-600">
+                    High School Recommendation
+                  </p>
+                  <h1 className="mt-3 font-display text-3xl font-semibold text-neutral-900 sm:text-4xl">
+                    高中择校推荐
+                  </h1>
+                </div>
+                {hsStep === 0 && (
+                  <Button
+                    onClick={handleHighSchoolCancel}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                    返回
+                  </Button>
+                )}
+              </div>
+
+              <StepIndicator
+                steps={HS_STEPS}
+                currentStep={hsStep}
+                className="mb-2"
+              />
+
+              {hsStep === 0 && (
+                <HighSchoolRecommendDialog
+                  onConfirm={handleHighSchoolConfirm}
+                  onCancel={handleHighSchoolCancel}
+                />
+              )}
+
+              {hsStep === 1 && (
+                <div className="flex flex-col items-center gap-4 py-12">
+                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
+                    <GraduationCap className="h-8 w-8 animate-pulse text-green-600" />
+                  </div>
+                  <p className="text-lg font-medium text-neutral-700">
+                    AI 正在分析高中录取数据...
+                  </p>
+                  <p className="text-sm text-neutral-500">
+                    正在搜索 {hsProvince} 的高中学校及近年录取分数线
+                  </p>
+                </div>
+              )}
+
+              {hsStep === 2 && hsRecommendations.length > 0 && (
+                <HighSchoolRecommendRanking
+                  recommendations={hsRecommendations}
+                  studentScore={hsStudentScore}
+                  province={hsProvince}
+                  onReset={handleHighSchoolReset}
+                />
+              )}
+
+              {hsStatus === "error" && hsStep === 2 && hsError && (
+                <div className="surface-elevated rounded-4xl px-6 py-12 text-center">
+                  <p className="text-base text-warm-700">{hsError}</p>
+                  <Button
+                    onClick={handleHighSchoolReset}
+                    variant="warm"
+                    className="mt-5"
+                  >
+                    重新搜索
+                  </Button>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
       </main>
 
       <SchoolTypeDialog
@@ -653,7 +836,7 @@ export function HomePage() {
         onRegister={auth.register}
       />
 
-      {!isInFlow && !isInUniFlow && <Footer />}
+      {!isInFlow && !isInUniFlow && !isInHsFlow && <Footer />}
     </div>
   );
 }

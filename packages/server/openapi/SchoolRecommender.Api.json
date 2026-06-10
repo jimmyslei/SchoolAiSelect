@@ -576,6 +576,30 @@
           }
         }
       }
+    },
+    "/api/highschools/recommend": {
+      "post": {
+        "tags": [
+          "HighSchools"
+        ],
+        "summary": "根据学生分数和所在省份，按冲/稳/保三档推荐适合报考的高中",
+        "operationId": "RecommendHighSchools",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/HighSchoolRecommendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
     }
   },
   "components": {
@@ -1061,6 +1085,26 @@
           }
         }
       },
+      "HighSchoolRecommendRequest": {
+        "required": [
+          "studentScore",
+          "province"
+        ],
+        "type": "object",
+        "properties": {
+          "studentScore": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "province": {
+            "type": "string"
+          }
+        }
+      },
       "IpLocationResponse": {
         "required": [
           "latitude",
@@ -1426,6 +1470,9 @@
     },
     {
       "name": "Universities"
+    },
+    {
+      "name": "HighSchools"
     }
   ]
 }

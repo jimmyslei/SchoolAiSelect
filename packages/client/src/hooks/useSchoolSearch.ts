@@ -40,6 +40,8 @@ export function useSchoolSearch() {
       address?: string,
       radius?: number,
       studentScore?: number,
+      token?: string,
+      onAuthError?: () => void,
     ) => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -63,6 +65,7 @@ export function useSchoolSearch() {
             studentScore,
           },
           controller.signal,
+          token,
         )) {
           if (event.type === "meta") {
             setLocationAddress(address ?? event.location.address);
@@ -112,7 +115,12 @@ export function useSchoolSearch() {
         if ((err as { name?: string })?.name === "AbortError") {
           return;
         }
-        setError(err instanceof Error ? err.message : "搜索出错，请重试");
+        const message = err instanceof Error ? err.message : "搜索出错，请重试";
+        // 后端 401 会返回 "请先登录" 相关消息
+        if (message.includes("登录") || message.includes("401")) {
+          onAuthError?.();
+        }
+        setError(message);
         setStatus("error");
       } finally {
         if (abortRef.current === controller) {

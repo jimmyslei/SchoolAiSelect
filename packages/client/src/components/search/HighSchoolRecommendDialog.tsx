@@ -1,0 +1,193 @@
+import { useState, useCallback } from "react";
+import { motion } from "framer-motion";
+import { GraduationCap, MapPin, Target } from "lucide-react";
+import { Button } from "@/components/ui/button";
+
+const PROVINCES = [
+  "北京市",
+  "天津市",
+  "上海市",
+  "重庆市",
+  "河北省",
+  "山西省",
+  "辽宁省",
+  "吉林省",
+  "黑龙江省",
+  "江苏省",
+  "浙江省",
+  "安徽省",
+  "福建省",
+  "江西省",
+  "山东省",
+  "河南省",
+  "湖北省",
+  "湖南省",
+  "广东省",
+  "海南省",
+  "四川省",
+  "贵州省",
+  "云南省",
+  "陕西省",
+  "甘肃省",
+  "青海省",
+  "台湾省",
+  "内蒙古自治区",
+  "广西壮族自治区",
+  "西藏自治区",
+  "宁夏回族自治区",
+  "新疆维吾尔自治区",
+];
+
+interface HighSchoolRecommendDialogProps {
+  onConfirm: (studentScore: number, province: string) => void;
+  onCancel: () => void;
+}
+
+export function HighSchoolRecommendDialog({
+  onConfirm,
+  onCancel,
+}: HighSchoolRecommendDialogProps) {
+  const [studentScore, setStudentScore] = useState<string>("");
+  const [province, setProvince] = useState<string>("");
+  const [scoreError, setScoreError] = useState<string>("");
+
+  const handleScoreChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      const raw = e.target.value.replace(/[^\d]/g, "");
+      if (raw.length > 4) return;
+      setStudentScore(raw);
+      setScoreError("");
+    },
+    [],
+  );
+
+  const score = parseInt(studentScore, 10);
+  const canSubmit =
+    !isNaN(score) && score >= 100 && score <= 900 && province.trim().length > 0;
+
+  const handleConfirm = useCallback(() => {
+    if (!canSubmit) {
+      if (isNaN(score) || score < 100 || score > 900) {
+        setScoreError("请输入 100–900 之间的有效分数");
+      }
+      return;
+    }
+    onConfirm(score, province);
+  }, [canSubmit, score, province, onConfirm]);
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === "Enter" && canSubmit) {
+        handleConfirm();
+      }
+    },
+    [canSubmit, handleConfirm],
+  );
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -20 }}
+      className="mx-auto max-w-2xl"
+    >
+      <div className="rounded-2xl border border-warm-200/50 bg-gradient-to-br from-white/95 to-warm-50/30 p-6 shadow-lg backdrop-blur-sm sm:p-8">
+        {/* Header */}
+        <div className="mb-6 flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 shadow-sm">
+            <GraduationCap className="h-6 w-6 text-green-600" />
+          </div>
+          <div>
+            <h2 className="font-display text-xl font-semibold text-neutral-900">
+              高中择校推荐
+            </h2>
+            <p className="text-sm text-neutral-500">
+              输入摸底考试分数和所在省份，AI 为你推荐"冲、稳、保"三档高中
+            </p>
+          </div>
+        </div>
+
+        {/* Score Input */}
+        <div className="mb-5">
+          <label className="mb-2 flex items-center gap-2 text-sm font-medium text-neutral-700">
+            <Target className="h-4 w-4 text-warm-500" />
+            摸底考试分数
+          </label>
+          <div className="flex items-center gap-3">
+            <input
+              type="number"
+              min={100}
+              max={900}
+              placeholder="输入分数，如 620"
+              value={studentScore}
+              onChange={handleScoreChange}
+              onKeyDown={handleKeyDown}
+              className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-lg font-medium text-neutral-900 shadow-sm outline-none transition-all focus:border-warm-400 focus:ring-2 focus:ring-warm-200"
+            />
+            <span className="shrink-0 text-sm text-neutral-400">分</span>
+          </div>
+          {scoreError && (
+            <p className="mt-1.5 text-sm text-red-500">{scoreError}</p>
+          )}
+          <p className="mt-1.5 text-xs text-neutral-400">
+            中考总分一般 600–820 分，请以当地实际满分为准
+          </p>
+        </div>
+
+        {/* Province Select */}
+        <div className="mb-6">
+          <label className="mb-2 flex items-center gap-2 text-sm font-medium text-neutral-700">
+            <MapPin className="h-4 w-4 text-green-500" />
+            所在省份
+          </label>
+          <select
+            value={province}
+            onChange={(e) => setProvince(e.target.value)}
+            className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-base text-neutral-900 shadow-sm outline-none transition-all focus:border-green-400 focus:ring-2 focus:ring-green-200"
+          >
+            <option value="">请选择省份</option>
+            {PROVINCES.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </select>
+          <p className="mt-1.5 text-xs text-neutral-400">
+            系统将根据该省份高中的历年录取分数线进行分析
+          </p>
+        </div>
+
+        {/* Preview */}
+        {canSubmit && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            className="mb-6 rounded-xl bg-gradient-to-r from-green-50 to-emerald-50/50 px-4 py-3 border border-green-100/60"
+          >
+            <p className="text-sm text-green-800">
+              将根据 <span className="font-semibold">{province}</span>{" "}
+              高中的录取数据， 为{" "}
+              <span className="font-semibold">{score} 分</span>{" "}
+              的成绩推荐冲/稳/保三档学校
+            </p>
+          </motion.div>
+        )}
+
+        {/* Actions */}
+        <div className="flex gap-3">
+          <Button variant="outline" onClick={onCancel} className="flex-1">
+            返回
+          </Button>
+          <Button
+            variant="warm"
+            onClick={handleConfirm}
+            disabled={!canSubmit}
+            className="flex-1"
+          >
+            开始分析推荐
+          </Button>
+        </div>
+      </div>
+    </motion.div>
+  );
+}

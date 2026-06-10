@@ -93,7 +93,12 @@ function MatchScoreBar({ score }: { score: number }) {
 function AdmissionTable({
   scores,
 }: {
-  scores: { year: number; minScore: number; avgScore?: number; note?: string }[];
+  scores: {
+    year: number;
+    minScore: number;
+    avgScore?: number;
+    note?: string;
+  }[];
 }) {
   if (scores.length === 0) return null;
 

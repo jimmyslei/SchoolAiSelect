@@ -18,9 +18,13 @@ const footerColumns = [
 
 export function Footer() {
   return (
-    <footer className="px-4 pb-6 pt-16 sm:px-6 lg:px-8">
-      <div className="surface-elevated mx-auto max-w-6xl rounded-[32px] px-6 py-10 sm:px-10">
-        <div className="grid gap-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr]">
+    <footer className="relative px-4 pb-8 pt-20 sm:px-6 lg:px-8">
+      <div className="relative overflow-hidden rounded-[32px] border border-border/40 bg-gradient-to-br from-warm-50/60 via-background to-sand-50/40 px-6 py-12 backdrop-blur-sm sm:px-10 mx-auto max-w-6xl">
+        {/* Decorative accent */}
+        <div className="pointer-events-none absolute -right-12 -top-12 h-48 w-48 rounded-full bg-peach-100/30 blur-3xl" />
+        <div className="pointer-events-none absolute -bottom-8 -left-8 h-36 w-36 rounded-full bg-gold-100/20 blur-3xl" />
+
+        <div className="relative grid gap-10 lg:grid-cols-[1.2fr_0.8fr_0.8fr]">
           <div className="space-y-5">
             <div className="flex items-center gap-3">
               <div className="flex h-12 w-12 items-center justify-center rounded-full bg-linear-to-br from-warm-500 to-peach-400 text-white shadow-[0_14px_28px_rgba(224,122,63,0.24)]">

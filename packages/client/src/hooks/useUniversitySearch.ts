@@ -23,6 +23,8 @@ export function useUniversitySearch() {
       studentScore: number,
       universityNames: string[],
       preferredMajors?: string[],
+      token?: string,
+      onAuthError?: () => void,
     ) => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -45,6 +47,7 @@ export function useUniversitySearch() {
             preferredMajors,
           },
           controller.signal,
+          token,
         )) {
           switch (event.type) {
             case "meta":
@@ -75,9 +78,12 @@ export function useUniversitySearch() {
         }
       } catch (err) {
         if (controller.signal.aborted) return;
-        setError(
-          err instanceof Error ? err.message : "搜索过程中发生未知错误",
-        );
+        const message =
+          err instanceof Error ? err.message : "搜索过程中发生未知错误";
+        if (message.includes("登录") || message.includes("401")) {
+          onAuthError?.();
+        }
+        setError(message);
         setStatus("error");
       }
     },

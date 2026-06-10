@@ -42,8 +42,8 @@ export function SearchHistoryCard({
   if (history.length === 0) return null;
 
   return (
-    <section className="mx-auto max-w-3xl px-4 sm:px-6">
-      <div className="surface-elevated rounded-[32px] p-5 sm:p-6">
+    <section className="mx-auto max-w-3xl px-4 py-6 sm:px-6">
+      <div className="overflow-hidden rounded-[32px] border border-border/40 bg-gradient-to-br from-background/90 to-warm-50/30 p-5 shadow-sm backdrop-blur-sm sm:p-6">
         <div className="mb-4 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Clock className="h-4 w-4 text-warm-500" />

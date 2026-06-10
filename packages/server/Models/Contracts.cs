@@ -176,3 +176,38 @@ public sealed record UniversityRanking(
     bool IsReachSchool,        // 冲一冲
     bool IsMatchSchool,        // 稳一稳
     bool IsSafetySchool);      // 保一保
+
+// ═══════════════════════════════════════════════════════════
+// 高中择校推荐（按省份 + 分数，冲/稳/保）
+// ═══════════════════════════════════════════════════════════
+
+/// <summary>高中择校推荐请求</summary>
+public sealed record HighSchoolRecommendRequest(
+    int StudentScore,
+    string Province);
+
+/// <summary>高中单年录取分数线</summary>
+public sealed record HighSchoolAdmissionYear(int Year, int Score);
+
+/// <summary>高中择校推荐项（单所高中）</summary>
+public sealed record HighSchoolRecommendation(
+    string SchoolName,
+    string? City,
+    IReadOnlyList<HighSchoolAdmissionYear> AdmissionScores,
+    string Category,            // "冲" / "稳" / "保"
+    int MatchScore,             // 录取匹配分 0-100
+    int AvgAdmissionScore,      // 近年平均录取线
+    string Recommendation,      // 推荐理由
+    // ── 扩展信息 ──
+    string? SchoolLevel,        // 学校级别：省级示范 / 市级重点 / 省重点 / 国家级示范 等
+    string? SchoolNature,       // 办学性质：公办 / 民办
+    string? SchoolFeatures,     // 学校特色，如"理科见长""外语特色""艺术体育强校"
+    string? TeachingStaffInfo,  // 师资概况，如"特级教师5人，高级教师占比60%"
+    string? KeyDisciplines,     // 优势学科，如"数学、物理"
+    int? StudentCount,          // 在校学生规模
+    string? Address,            // 学校详细地址
+    string? Website,            // 学校官网
+    int? EnrollmentPlan,        // 最新一年招生计划人数
+    string? EnrollmentNote,     // 招生备注，如"面向全市招生""有住宿"
+    int MinAdmissionScore,      // 近年最低录取线
+    int MaxAdmissionScore);     // 近年最高录取线

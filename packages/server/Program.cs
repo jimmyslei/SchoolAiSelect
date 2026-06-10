@@ -118,6 +118,8 @@ builder.Services.AddSingleton<SchoolRankingService>();
 builder.Services.AddSingleton<UniversityAnalysisAgent>();
 builder.Services.AddSingleton<UniversityAnalysisOrchestrator>();
 builder.Services.AddSingleton<UniversityRankingService>();
+builder.Services.AddSingleton<HighSchoolRecommendAgent>();
+builder.Services.AddSingleton<HighSchoolRankingService>();
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<MessageService>();
 builder.Services.AddSingleton<AnalyticsService>();
@@ -382,8 +384,15 @@ schoolGroup.MapPost("/search",
         SchoolAnalysisOrchestrator orchestrator,
         SchoolRankingService rankingService,
         AnalyticsService analyticsService,
+        AuthService authService,
         CancellationToken cancellationToken) =>
     {
+        if (authService.GetUserFromRequest(httpContext) is null)
+        {
+            await WriteJsonErrorAsync(httpContext, StatusCodes.Status401Unauthorized, "请先登录后再开始分析", cancellationToken);
+            return;
+        }
+
         if (!GeoValidator.IsValidLatitude(request.Latitude) || !GeoValidator.IsValidLongitude(request.Longitude))
         {
             await WriteJsonErrorAsync(httpContext, StatusCodes.Status400BadRequest, "经纬度范围无效", cancellationToken);
@@ -586,8 +595,15 @@ universityGroup.MapPost("/search",
         [FromBody] UniversitySearchRequest request,
         UniversityAnalysisOrchestrator orchestrator,
         UniversityRankingService rankingService,
+        AuthService authService,
         CancellationToken cancellationToken) =>
     {
+        if (authService.GetUserFromRequest(httpContext) is null)
+        {
+            await WriteJsonErrorAsync(httpContext, StatusCodes.Status401Unauthorized, "请先登录后再开始分析", cancellationToken);
+            return;
+        }
+
         if (request.StudentScore is < 0 or > 750)
         {
             await WriteJsonErrorAsync(httpContext, StatusCodes.Status400BadRequest, "请输入有效的高考分数 (0-750)", cancellationToken);
@@ -673,6 +689,110 @@ universityGroup.MapPost("/search",
     })
     .WithName("SearchUniversities")
     .WithSummary("根据高考成绩和意向大学，分析录取分数线与专业信息，推荐报考排名");
+
+// ═══════════════════════════════════════════════════════════
+// 高中择校推荐 API（按省份 + 分数，冲/稳/保）
+// ═══════════════════════════════════════════════════════════
+
+var highSchoolGroup = app.MapGroup("/api/highschools")
+    .WithTags("HighSchools")
+    .RequireRateLimiting("api");
+
+highSchoolGroup.MapPost("/recommend",
+    async (
+        HttpContext httpContext,
+        [FromBody] HighSchoolRecommendRequest request,
+        HighSchoolRecommendAgent agent,
+        HighSchoolRankingService rankingService,
+        AuthService authService,
+        CancellationToken cancellationToken) =>
+    {
+        if (authService.GetUserFromRequest(httpContext) is null)
+        {
+            await WriteJsonErrorAsync(httpContext, StatusCodes.Status401Unauthorized, "请先登录后再开始分析", cancellationToken);
+            return;
+        }
+
+        if (request.StudentScore is < 100 or > 900)
+        {
+            await WriteJsonErrorAsync(httpContext, StatusCodes.Status400BadRequest, "请输入有效的考试分数 (100-900)", cancellationToken);
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(request.Province))
+        {
+            await WriteJsonErrorAsync(httpContext, StatusCodes.Status400BadRequest, "请选择所在省份", cancellationToken);
+            return;
+        }
+
+        httpContext.Response.StatusCode = StatusCodes.Status200OK;
+        httpContext.Response.ContentType = "text/event-stream; charset=utf-8";
+        httpContext.Response.Headers.CacheControl = "no-cache";
+        httpContext.Response.Headers.Connection = "keep-alive";
+        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+
+        var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+
+        async Task WriteEventAsync(string eventName, object payload)
+        {
+            var json = JsonSerializer.Serialize(payload, jsonOptions);
+            var sb = new StringBuilder();
+            sb.Append("event: ").Append(eventName).Append('\n');
+            foreach (var line in json.Split('\n'))
+            {
+                sb.Append("data: ").Append(line).Append('\n');
+            }
+            sb.Append('\n');
+            var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+            await httpContext.Response.Body.WriteAsync(bytes, cancellationToken);
+            await httpContext.Response.Body.FlushAsync(cancellationToken);
+        }
+
+        try
+        {
+            await WriteEventAsync("meta", new
+            {
+                studentScore = request.StudentScore,
+                province = request.Province,
+            });
+
+            var recommendations = await agent.RecommendAsync(
+                request.StudentScore,
+                request.Province,
+                cancellationToken);
+
+            if (recommendations.Count == 0)
+            {
+                await WriteEventAsync("done", new
+                {
+                    recommendations = Array.Empty<HighSchoolRecommendation>(),
+                    message = $"暂未找到 {request.Province} 高中的有效录取数据，请稍后重试",
+                });
+                return;
+            }
+
+            var normalized = rankingService.Normalize(recommendations, request.StudentScore);
+
+            await WriteEventAsync("done", new
+            {
+                recommendations = normalized,
+            });
+        }
+        catch (OperationCanceledException)
+        {
+            // client disconnected
+        }
+        catch (Exception exception)
+        {
+            try
+            {
+                await WriteEventAsync("error", new { message = exception.Message });
+            }
+            catch { }
+        }
+    })
+    .WithName("RecommendHighSchools")
+    .WithSummary("根据学生分数和所在省份，按冲/稳/保三档推荐适合报考的高中");
 
 try
 {

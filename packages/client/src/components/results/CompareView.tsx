@@ -45,12 +45,12 @@ export function CompareView({ rankings, onBack }: CompareViewProps) {
       </div>
 
       {/* 雷达图 */}
-      <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm p-5 mb-5">
+      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-warm-50/20 p-5 shadow-sm backdrop-blur-sm mb-5">
         <ComparisonRadar rankings={rankings} />
       </div>
 
       {/* 对比表格 */}
-      <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm p-5">
+      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-sand-50/20 p-5 shadow-sm backdrop-blur-sm">
         <ComparisonTable rankings={rankings} />
       </div>
 

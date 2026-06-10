@@ -35,9 +35,12 @@ public sealed class FunctionCallArgumentNormalizerChatClient(IChatClient inner) 
     {
         foreach (var message in response.Messages)
         {
+            var hasFunctionCall = false;
             for (var i = 0; i < message.Contents.Count; i++)
             {
                 if (message.Contents[i] is not FunctionCallContent fcc) continue;
+
+                hasFunctionCall = true;
 
                 var normalizedArgs = TryNormalizeArguments(fcc);
                 if (normalizedArgs is null) continue;
@@ -47,7 +50,29 @@ public sealed class FunctionCallArgumentNormalizerChatClient(IChatClient inner) 
                     RawRepresentation = fcc.RawRepresentation,
                 };
             }
+
+            if (!hasFunctionCall
+                && TryGetText(message, response) is { } text
+                && FunctionCallArgumentNormalization.TryParseMimoToolCall(text) is { } mimoToolCall)
+            {
+                message.Contents.Clear();
+                message.Contents.Add(new FunctionCallContent(
+                    $"mimo_{Guid.NewGuid():N}",
+                    mimoToolCall.FunctionName,
+                    mimoToolCall.Arguments));
+            }
         }
+    }
+
+    private static string? TryGetText(Microsoft.Extensions.AI.ChatMessage message, ChatResponse response)
+    {
+        var text = string.Concat(message.Contents.OfType<TextContent>().Select(content => content.Text));
+        if (!string.IsNullOrWhiteSpace(text))
+        {
+            return text;
+        }
+
+        return string.IsNullOrWhiteSpace(response.Text) ? null : response.Text;
     }
 
     private static Dictionary<string, object?>? TryNormalizeArguments(FunctionCallContent fcc)
