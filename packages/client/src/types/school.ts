@@ -121,12 +121,14 @@ export interface SessionUser {
   id: number;
   email: string;
   displayName: string;
+  isAdmin?: boolean;
 }
 
 /** 登录/注册响应 */
 export interface AuthPayload {
   token: string;
   user: SessionUser;
+  expiresAt: string;
 }
 
 /** 留言回复 */
@@ -149,6 +151,27 @@ export interface MessageThread {
   content: string;
   createdAt: string;
   replies: MessageReply[];
+}
+
+/** 系统留言回复 */
+export interface SiteMessageReply {
+  id: number;
+  messageId: number;
+  userId: number;
+  authorName: string;
+  isAdmin: boolean;
+  content: string;
+  createdAt: string;
+}
+
+/** 系统留言 */
+export interface SiteMessageThread {
+  id: number;
+  userId: number;
+  authorName: string;
+  content: string;
+  createdAt: string;
+  replies: SiteMessageReply[];
 }
 
 /** 搜索状态 */

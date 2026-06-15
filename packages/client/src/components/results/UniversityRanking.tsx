@@ -25,6 +25,7 @@ interface UniversityRankingListProps {
   analysesMap: Map<string, UniversityAnalysis>;
   analyzedCount: number;
   totalCount: number;
+  studentScore: number;
   onReset: () => void;
 }
 
@@ -142,6 +143,71 @@ function AdmissionTable({
   );
 }
 
+/** 分数趋势迷你图 */
+function ScoreTrendChart({
+  scores,
+  studentScore,
+}: {
+  scores: { year: number; score: number }[];
+  studentScore: number;
+}) {
+  const valid = scores
+    .filter((s) => s.score > 0 && Number.isFinite(s.score))
+    .sort((a, b) => a.year - b.year);
+  if (valid.length < 2) return null;
+  // 防止 studentScore 为 0 或 NaN（初始值未赋值时）导致 min/max 计算异常
+  const safeStudentScore =
+    Number.isFinite(studentScore) && studentScore > 0
+      ? studentScore
+      : valid[valid.length - 1].score;
+
+  const allScores = [...valid.map((s) => s.score), safeStudentScore];
+  const minVal = Math.min(...allScores) - 10;
+  const maxVal = Math.max(...allScores) + 10;
+  const range = maxVal - minVal || 1;
+  const w = 200;
+  const h = 60;
+
+  const points = valid.map((s, i) => ({
+    x: (i / (valid.length - 1)) * w,
+    y: h - ((s.score - minVal) / range) * h,
+  }));
+
+  const pathD = points
+    .map((p, i) => `${i === 0 ? "M" : "L"} ${p.x} ${p.y}`)
+    .join(" ");
+  const studentY = h - ((safeStudentScore - minVal) / range) * h;
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="h-14 w-full">
+      {/* 学生分数参考线 */}
+      <line
+        x1={0}
+        y1={studentY}
+        x2={w}
+        y2={studentY}
+        stroke="#a3a3a3"
+        strokeWidth={1}
+        strokeDasharray="4 3"
+      />
+      <text x={2} y={studentY - 3} fontSize={8} fill="#737373">
+        你的分数({safeStudentScore})
+      </text>
+      {/* 录取线趋势 */}
+      <path
+        d={pathD}
+        fill="none"
+        stroke="#6366f1"
+        strokeWidth={2}
+        strokeLinecap="round"
+      />
+      {points.map((p, i) => (
+        <circle key={i} cx={p.x} cy={p.y} r={3} fill="#6366f1" />
+      ))}
+    </svg>
+  );
+}
+
 /** 专业信息卡片 */
 function MajorCard({ major }: { major: MajorAnalysis }) {
   return (
@@ -191,9 +257,11 @@ function MajorCard({ major }: { major: MajorAnalysis }) {
 /** 单所大学排名卡片 */
 function UniversityCard({
   ranking,
+  studentScore,
   isAnalyzing,
 }: {
   ranking: UniversityRanking;
+  studentScore: number;
   isAnalyzing?: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -322,6 +390,16 @@ function UniversityCard({
                     <TrendingUp className="h-4 w-4 text-warm-500" />
                     近年录取分数线
                   </h4>
+                  {/* 趋势图 */}
+                  <div className="rounded-lg bg-white p-2">
+                    <ScoreTrendChart
+                      scores={analysis.admissionScores.map((s) => ({
+                        year: s.year,
+                        score: s.minScore,
+                      }))}
+                      studentScore={studentScore}
+                    />
+                  </div>
                   <AdmissionTable scores={analysis.admissionScores} />
                 </div>
               )}
@@ -387,6 +465,7 @@ export function UniversityRankingList({
   analysesMap,
   analyzedCount,
   totalCount,
+  studentScore,
   onReset,
 }: UniversityRankingListProps) {
   const isStreaming = totalCount > 0 && analyzedCount < totalCount;
@@ -451,6 +530,7 @@ export function UniversityRankingList({
             <UniversityCard
               key={ranking.analysis.info.name}
               ranking={ranking}
+              studentScore={studentScore}
               isAnalyzing={false}
             />
           ))}

@@ -1,3 +1,4 @@
+import { motion } from "framer-motion";
 import { Check } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -22,17 +23,54 @@ export function StepIndicator({
       {steps.map((step, index) => {
         const isCompleted = index < currentStep;
         const isCurrent = index === currentStep;
+        const isAnalysisStep = /分析/.test(step);
 
         return (
           <div key={step} className="flex flex-1 items-center gap-3">
             <div
               className={cn(
-                "flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all",
+                "relative flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold transition-all",
                 isCompleted && "bg-warm-500 text-white",
                 isCurrent && "warm-ring bg-warm-100 text-warm-700",
                 !isCompleted && !isCurrent && "bg-muted text-neutral-400",
               )}
             >
+              {isCurrent && isAnalysisStep && (
+                <>
+                  <motion.span
+                    aria-hidden
+                    className="absolute -inset-1 rounded-full border-2 border-warm-300/80 shadow-[0_0_0_6px_rgba(251,191,36,0.08)]"
+                    animate={{ scale: [1, 1.9], opacity: [0.7, 0] }}
+                    transition={{
+                      duration: 1.9,
+                      repeat: Infinity,
+                      ease: "easeOut",
+                    }}
+                  />
+                  <motion.span
+                    aria-hidden
+                    className="absolute -inset-2 rounded-full border-2 border-peach-300/70"
+                    animate={{ scale: [0.95, 2.2], opacity: [0.6, 0] }}
+                    transition={{
+                      duration: 1.9,
+                      repeat: Infinity,
+                      ease: "easeOut",
+                      delay: 0.38,
+                    }}
+                  />
+                  <motion.span
+                    aria-hidden
+                    className="absolute -inset-3 rounded-full border border-warm-200/55"
+                    animate={{ scale: [0.9, 2.45], opacity: [0.45, 0] }}
+                    transition={{
+                      duration: 1.9,
+                      repeat: Infinity,
+                      ease: "easeOut",
+                      delay: 0.76,
+                    }}
+                  />
+                </>
+              )}
               {isCompleted ? <Check className="h-4 w-4" /> : index + 1}
             </div>
 

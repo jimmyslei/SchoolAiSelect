@@ -21,7 +21,8 @@ public sealed record SchoolServiceOptions(
     string SmtpFromEmail,
     string SmtpFromName,
     int AnalysisMaxConcurrency,
-    int AmapPageSize)
+    int AmapPageSize,
+    string RedisConnectionString)
 {
     public static SchoolServiceOptions FromConfiguration(IConfiguration configuration)
     {
@@ -52,7 +53,8 @@ public sealed record SchoolServiceOptions(
             SmtpFromEmail: configuration["SMTP_FROM_EMAIL"] ?? configuration["SMTP_USERNAME"] ?? string.Empty,
             SmtpFromName: configuration["SMTP_FROM_NAME"] ?? "学校推荐系统",
             AnalysisMaxConcurrency: Math.Clamp(maxConcurrency, 1, 32),
-            AmapPageSize: Math.Clamp(int.TryParse(configuration["AMAP_PAGE_SIZE"], out var pageSize) ? pageSize : 25, 1, 25));
+            AmapPageSize: Math.Clamp(int.TryParse(configuration["AMAP_PAGE_SIZE"], out var pageSize) ? pageSize : 25, 1, 25),
+            RedisConnectionString: configuration["REDIS_CONNECTION_STRING"] ?? "localhost:6379");
     }
 
     private static bool ShouldUseResponsesApi(string? configuredBaseUrl, string? apiStyle)

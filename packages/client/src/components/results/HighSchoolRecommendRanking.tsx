@@ -142,7 +142,7 @@ function ScoreTrendChart({
         strokeDasharray="4 3"
       />
       <text x={2} y={studentY - 3} fontSize={8} fill="#737373">
-        你的分数
+        你的分数({studentScore})
       </text>
       {/* 录取线趋势 */}
       <path

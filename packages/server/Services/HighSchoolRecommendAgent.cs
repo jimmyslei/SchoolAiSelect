@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI;
@@ -7,6 +8,8 @@ using System.ClientModel.Primitives;
 using System.Reflection;
 using SchoolRecommender.Api.Models;
 using SchoolRecommender.Api.Options;
+using OpenAI.Responses;
+using Microsoft.AspNetCore;
 
 namespace SchoolRecommender.Api.Services;
 
@@ -53,17 +56,33 @@ public sealed class HighSchoolRecommendAgent
 
         var searchWebTool = AIFunctionFactory.Create(
             (string query, int? num, CancellationToken ct)
-                => skillScriptRunner.SearchSchoolInfoAsync(query, null, null, ct),
+                => skillScriptRunner.SearchGeneralWebAsync(query, num, ct),
             name: "search_web",
             description: "通用联网搜索工具。query 为搜索关键词，返回搜索结果列表。" +
                 "适用于搜索省份高中排名、录取分数线汇总等宏观信息。");
+
+        var searchWechatArticlesTool = AIFunctionFactory.Create(
+            (string query, int? num, string? region, CancellationToken ct)
+                => skillScriptRunner.SearchWechatArticlesAsync(query, num, region, ct),
+            name: "search_wechat_articles",
+            description: "微信公众号文章搜索工具。\n" +
+                "- query（必填）：搜索关键词，适合传入学校名、学校名+录取分数线、学校名+招生简章等。\n" +
+                "- num（可选）：返回结果数。\n" +
+                "- region（可选）：省份或城市，用于给关键词追加地域前缀，减少歧义。\n" +
+                "适用于补充学校录取分数线、招生简章、家长经验、学校评价等微信公众号文章线索。返回文章列表。");
+
+        var fetchWebpageContentTool = AIFunctionFactory.Create(
+            (string url, CancellationToken ct)
+                => skillScriptRunner.FetchWebpageContentAsync(url, ct),
+            name: "fetch_webpage_content",
+            description: "读取公开网页正文内容。传入 search_school_info 或 search_web 返回结果中的 url，返回 { url, title, content, contentLength, admissionScoreHints }，用于从页面正文提取录取分数线、招生说明等细节。只支持公开 http/https 页面。");
 
         var chatClient = CreateChatClient(openAiClient, options);
 
         var agentChatOptions = new ChatOptions
         {
             Instructions = SystemInstructions,
-            Tools = [searchSchoolInfoTool, searchWebTool],
+            Tools = [searchSchoolInfoTool, searchWebTool, searchWechatArticlesTool, fetchWebpageContentTool], //new HostedWebSearchTool()
         };
 
         _agent = new FunctionCallArgumentNormalizerChatClient(chatClient)
@@ -129,6 +148,7 @@ public sealed class HighSchoolRecommendAgent
         }
     }
 
+
     private static string BuildPrompt(int studentScore, string province)
     {
         return $$"""
@@ -155,7 +175,9 @@ public sealed class HighSchoolRecommendAgent
 对每所高中，分别搜索以下信息：
 a) 录取分数线：search_school_info(school_name="XX中学", aspect="录取分数线", region="{{province}}")
 b) 学校评价与特色：search_school_info(school_name="XX中学", aspect="评价", region="{{province}}")
-c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分数线 2024 2023")
+c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分数线 2025 2024 2023")
+d) 若 search_web / search_school_info 结果不足，必须补充调用 search_wechat_articles(query="XX中学", region="{{province}}") 获取公众号文章线索
+e) 对包含录取分数或招生简章线索的结果，必须继续调用 fetch_webpage_content(url="...") 读取正文，再从正文中提取年份与分数；不能只依赖搜索摘要
 
 ═══════════════════════════════════════════
 【第三步：分类标准（严格执行）】
@@ -172,7 +194,15 @@ c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分
 【输出格式】
 ═══════════════════════════════════════════
 
-只返回严格 JSON 数组，不含 Markdown 代码块，不含解释文字。
+你必须只返回严格 JSON 数组本身。
+禁止返回以下任何额外内容：
+- 禁止返回“以下是结果”“说明”“分析如下”等前置文字
+- 禁止返回 Markdown 代码块，如 ```json
+- 禁止返回数组前后的任何自然语言、注释、总结、提醒、空行包装
+- 输出的第一个字符必须是 `[`
+- 输出的最后一个字符必须是 `]`
+
+如果你准备输出的内容不是一个可直接被 JSON.parse 成功解析的 JSON 数组，则必须立即重新组织，直到满足要求为止。
 
 每所学校必须包含以下所有字段（搜不到的字段填 null）：
 
@@ -211,6 +241,11 @@ c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分
 - matchScore = 匹配分（0-100），100=远超录取线，50=持平，0=远低于
 - minAdmissionScore / maxAdmissionScore = 近年录取线的最低/最高值
 - 如果某年数据缺失，score 填 0
+- 优先依据网页正文中的明确年份+分数信息填写 admissionScores；搜索摘要只能作为线索，不能直接当最终分数证据
+- 若 fetch_webpage_content 返回 admissionScoreHints，优先使用其中的年份+分数线索，再回到正文上下文核对是否确实是该校录取线
+- 仅当“年份”和“分数”在同一段正文附近同时出现，并伴随“录取分数线 / 统招线 / 投档线 / 最低录取 / 中考”等词时，才可记入 admissionScores
+- 同一页面若出现多个分数，优先选择与学校名、年份、录取线关键词同时邻近的分数；明显属于学费、满分、班型分班、排名数字的内容不得算作录取线
+- 如果无法确认某一年分数是否为该校正式录取线，该年份 score 必须填 0，不得猜测
 - 不同省份中考总分不同，请根据省份实际分析
 - 禁止编造数据，搜不到就跳过该校
 """;
@@ -227,7 +262,8 @@ c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分
                 return Array.Empty<HighSchoolRecommendation>();
             }
 
-            var recommendations = JsonSerializer.Deserialize<List<HighSchoolRecommendation>>(json, JsonOptions);
+            var normalizedJson = NormalizeRecommendationJson(json);
+            var recommendations = JsonSerializer.Deserialize<List<HighSchoolRecommendation>>(normalizedJson, JsonOptions);
             if (recommendations is null || recommendations.Count == 0)
             {
                 _logger.LogWarning("Agent 返回了空的推荐列表，省份: {Province}", province);
@@ -291,6 +327,116 @@ c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分
         return null;
     }
 
+    private static string NormalizeRecommendationJson(string json)
+    {
+        JsonNode? root;
+        try
+        {
+            root = JsonNode.Parse(json);
+        }
+        catch (JsonException)
+        {
+            return json;
+        }
+
+        if (root is not JsonArray recommendations)
+        {
+            return json;
+        }
+
+        foreach (var recommendationNode in recommendations.OfType<JsonObject>())
+        {
+            NormalizeIntField(recommendationNode, "matchScore");
+            NormalizeIntField(recommendationNode, "avgAdmissionScore");
+            NormalizeDoubleField(recommendationNode, "minAdmissionScore");
+            NormalizeDoubleField(recommendationNode, "maxAdmissionScore");
+            NormalizeStringField(recommendationNode, "studentCount");
+            NormalizeStringField(recommendationNode, "enrollmentPlan");
+
+            if (recommendationNode["admissionScores"] is JsonArray admissionScores)
+            {
+                foreach (var scoreNode in admissionScores.OfType<JsonObject>())
+                {
+                    NormalizeIntField(scoreNode, "year");
+                    NormalizeDoubleField(scoreNode, "score");
+                }
+            }
+        }
+
+        return root.ToJsonString();
+    }
+
+    private static void NormalizeIntField(JsonObject node, string fieldName)
+    {
+        if (node[fieldName] is null)
+        {
+            return;
+        }
+
+        var value = ReadDoubleValue(node[fieldName]);
+        if (value is not null)
+        {
+            node[fieldName] = (int)Math.Round(value.Value);
+        }
+    }
+
+    private static void NormalizeDoubleField(JsonObject node, string fieldName)
+    {
+        if (node[fieldName] is null)
+        {
+            return;
+        }
+
+        var value = ReadDoubleValue(node[fieldName]);
+        if (value is not null)
+        {
+            node[fieldName] = value.Value;
+        }
+    }
+
+    private static void NormalizeStringField(JsonObject node, string fieldName)
+    {
+        if (node[fieldName] is null)
+        {
+            return;
+        }
+
+        if (node[fieldName] is JsonValue valueNode)
+        {
+            if (valueNode.TryGetValue<string>(out var textValue))
+            {
+                node[fieldName] = textValue;
+                return;
+            }
+
+            if (valueNode.TryGetValue<double>(out var numericValue))
+            {
+                node[fieldName] = Math.Round(numericValue).ToString("0");
+            }
+        }
+    }
+
+    private static double? ReadDoubleValue(JsonNode? node)
+    {
+        if (node is not JsonValue valueNode)
+        {
+            return null;
+        }
+
+        if (valueNode.TryGetValue<double>(out var numericValue))
+        {
+            return numericValue;
+        }
+
+        if (valueNode.TryGetValue<string>(out var textValue)
+            && double.TryParse(textValue, out var parsedValue))
+        {
+            return parsedValue;
+        }
+
+        return null;
+    }
+
     private const string SystemInstructions =
         """
         你是一位资深教育择校顾问，拥有丰富的中考志愿填报经验。你的任务是根据学生的摸底考试成绩和所在省份，
@@ -303,6 +449,8 @@ c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分
           aspect 可选值：录取分数线 / 评价 / 师资 / 招生 / 排名。
           region 传入省份或城市用于消歧。
         - search_web(query, num?)：通用联网搜索。适用于搜索省份高中排名、录取分数线汇总等宏观信息。
+                - search_wechat_articles(query, num?, region?)：微信公众号文章搜索。适用于补充学校录取分数线、招生简章、学校评价、家长经验等公众号内容线索。
+                - fetch_webpage_content(url)：读取公开网页正文。必须用于打开搜索结果中的候选链接，提取录取分数线原文证据。
 
         【强制调研流程】
         步骤 1：调用 search_web，搜索省份高中排名和省级示范高中名单，获取 15-20 所代表性高中。
@@ -310,18 +458,24 @@ c) 如仍缺数据，用 search_web(query="{{province}} XX中学 中考录取分
         步骤 2：对每所高中，分别调用：
                - search_school_info(aspect="录取分数线")：获取近 5 年录取线
                - search_school_info(aspect="评价")：获取学校特色、师资等信息
-        步骤 3：将学校严格按以下标准分为三档，每档至少 3 所：
+               - 若网页搜索结果不足或偏少，继续调用 search_wechat_articles(query="学校名 录取分数线/招生简章/中考", region="省份") 补充线索
+           步骤 3：对 search_school_info / search_web / search_wechat_articles 返回的候选结果，挑选最相关的 1-3 个 url，继续调用 fetch_webpage_content 读取正文，并从正文中提取带年份的录取分数线。
+             ⚠ 不允许只根据标题或摘要直接填写分数；若正文无明确分数，则该年份记为 0 或跳过该校。
+             ⚠ 若 fetch_webpage_content 返回了 admissionScoreHints，先用它定位候选年份与分数，再回看正文确认该数字是否真的是该校录取线。
+         步骤 4：将学校严格按以下标准分为三档，每档至少 3 所：
                - "冲"：学生分数 < 平均录取线，差距 5~40 分
                - "稳"：学生分数 ≈ 平均录取线（差距 -15~+15 分）
                - "保"：学生分数 > 平均录取线 + 15 分
                如果某档候选不足，必须扩大搜索范围补足。
-        步骤 4：输出包含完整信息的 JSON 数组。
+         步骤 5：输出包含完整信息的 JSON 数组。
 
         【禁止事项】
         - 不得编造录取分数线数据
+         - 不得把搜索结果摘要中的模糊数字直接当成录取线，必须优先核对网页正文
+        - 不得把学费、总分、实验班分班线、排名、上线率、招生人数当成录取线
         - 搜不到数据的学校应跳过，不得用猜测数据
         - 不同省份中考总分不同，必须根据省份实际情况分析
-        - 最终只输出严格 JSON 数组，不加 Markdown 代码块或过程说明
+        - 最终回复必须只包含 JSON 数组本身，不允许有任何前缀、后缀、解释、标题、备注、代码块标记
         - 每个分类（冲/稳/保）至少 3 所学校，这是硬性要求
         """;
 

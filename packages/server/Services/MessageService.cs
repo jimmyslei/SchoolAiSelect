@@ -13,6 +13,8 @@ public sealed class MessageService
         _freeSql = freeSql;
     }
 
+    // ───── 学校留言 ─────
+
     public async Task<IReadOnlyList<MessageThread>> GetMessagesAsync(string? schoolId, CancellationToken cancellationToken)
     {
         var messagesQuery = _freeSql.Select<Message, AppUser>()
@@ -35,11 +37,15 @@ public sealed class MessageService
         }
 
         var messageIds = rows.Select(row => row.Message.Id).ToArray();
-        var replies = await _freeSql.Select<MessageReply, AppUser>()
+        var replyRows = await _freeSql.Select<MessageReply, AppUser>()
             .LeftJoin((reply, user) => reply.UserId == user.Id)
             .Where((reply, _) => messageIds.Contains(reply.MessageId))
             .OrderBy((reply, _) => reply.CreatedAt)
-            .ToListAsync((reply, user) => new MessageReplyDto(reply.Id, reply.MessageId, reply.UserId, user.DisplayName, reply.Content, ToUtcOffset(reply.CreatedAt)), cancellationToken);
+            .ToListAsync((reply, user) => new MessageReplyRow(
+                reply.Id, reply.MessageId, reply.UserId, user.DisplayName, reply.Content, reply.CreatedAt), cancellationToken);
+
+        var replies = replyRows.Select(r => new MessageReplyDto(
+            r.Id, r.MessageId, r.UserId, r.DisplayName, r.Content, ToUtcOffset(r.CreatedAt))).ToList();
 
         var repliesByMessage = replies
             .GroupBy(reply => reply.MessageId)
@@ -123,4 +129,84 @@ public sealed class MessageService
     }
 
     private sealed record MessageRow(Message Message, string AuthorName);
+    private sealed record MessageReplyRow(long Id, long MessageId, long UserId, string DisplayName, string Content, DateTime CreatedAt);
+
+    // ───── 系统留言 ─────
+
+    public async Task<IReadOnlyList<SiteMessageThread>> GetSiteMessagesAsync(CancellationToken cancellationToken)
+    {
+        var rows = await _freeSql.Select<SiteMessage, AppUser>()
+            .LeftJoin((msg, user) => msg.UserId == user.Id)
+            .OrderByDescending((msg, _) => msg.CreatedAt)
+            .Limit(100)
+            .ToListAsync((msg, user) => new SiteMessageRow(msg, user.DisplayName), cancellationToken);
+
+        if (rows.Count == 0)
+        {
+            return Array.Empty<SiteMessageThread>();
+        }
+
+        var messageIds = rows.Select(r => r.Message.Id).ToArray();
+        var replyRows = await _freeSql.Select<SiteMessageReply, AppUser>()
+            .LeftJoin((reply, user) => reply.UserId == user.Id)
+            .Where((reply, _) => messageIds.Contains(reply.MessageId))
+            .OrderBy((reply, _) => reply.CreatedAt)
+            .ToListAsync((reply, user) => new SiteMessageReplyRow(
+                reply.Id, reply.MessageId, reply.UserId, user.DisplayName,
+                user.IsAdmin, reply.Content, reply.CreatedAt), cancellationToken);
+
+        var replies = replyRows.Select(r => new SiteMessageReplyDto(
+            r.Id, r.MessageId, r.UserId, r.DisplayName,
+            r.IsAdmin, r.Content, r.CreatedAt)).ToList();
+
+        var repliesByMessage = replies
+            .GroupBy(r => r.MessageId)
+            .ToDictionary(g => g.Key, g => (IReadOnlyList<SiteMessageReplyDto>)g.ToArray());
+
+        return rows.Select(r => new SiteMessageThread(
+            r.Message.Id, r.Message.UserId, r.AuthorName,
+            r.Message.Content, r.Message.CreatedAt,
+            repliesByMessage.TryGetValue(r.Message.Id, out var list) ? list : Array.Empty<SiteMessageReplyDto>()))
+            .ToArray();
+    }
+
+    public async Task<SiteMessageThread> CreateSiteMessageAsync(SessionUser user, CreateSiteMessageRequest request, CancellationToken cancellationToken)
+    {
+        var content = request.Content.Trim();
+        ValidateContent(content);
+
+        var msg = new SiteMessage
+        {
+            UserId = user.Id,
+            Content = content,
+            CreatedAt = DateTime.UtcNow,
+        };
+        msg.Id = (long)await _freeSql.Insert(msg).ExecuteIdentityAsync(cancellationToken);
+        return new SiteMessageThread(msg.Id, user.Id, user.DisplayName, msg.Content, ToUtcOffset(msg.CreatedAt), Array.Empty<SiteMessageReplyDto>());
+    }
+
+    public async Task<SiteMessageReplyDto?> CreateSiteMessageReplyAsync(SessionUser adminUser, long messageId, CreateReplyRequest request, CancellationToken cancellationToken)
+    {
+        var exists = await _freeSql.Select<SiteMessage>().Where(m => m.Id == messageId).AnyAsync(cancellationToken);
+        if (!exists)
+        {
+            return null;
+        }
+
+        var content = request.Content.Trim();
+        ValidateContent(content);
+
+        var reply = new SiteMessageReply
+        {
+            MessageId = messageId,
+            UserId = adminUser.Id,
+            Content = content,
+            CreatedAt = DateTime.UtcNow,
+        };
+        reply.Id = (long)await _freeSql.Insert(reply).ExecuteIdentityAsync(cancellationToken);
+        return new SiteMessageReplyDto(reply.Id, reply.MessageId, adminUser.Id, adminUser.DisplayName, adminUser.IsAdmin, reply.Content, ToUtcOffset(reply.CreatedAt));
+    }
+
+    private sealed record SiteMessageRow(SiteMessage Message, string AuthorName);
+    private sealed record SiteMessageReplyRow(long Id, long MessageId, long UserId, string DisplayName, bool IsAdmin, string Content, DateTime CreatedAt);
 }

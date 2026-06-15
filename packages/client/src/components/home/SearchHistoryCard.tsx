@@ -60,63 +60,67 @@ export function SearchHistoryCard({
           </Button>
         </div>
 
-        <AnimatePresence mode="popLayout">
-          {history.slice(0, 5).map((item) => (
-            <motion.div
-              key={item.id}
-              layout
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="group flex items-center gap-3 rounded-2xl bg-background/60 px-4 py-3 transition-colors hover:bg-warm-50"
-            >
-              <div
-                className={
-                  "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold " +
-                  TYPE_COLORS[item.schoolType]
-                }
-              >
-                {SchoolTypeLabels[item.schoolType][0]}
-              </div>
-
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-neutral-800">
-                    {SchoolTypeLabels[item.schoolType]}
-                  </span>
-                  <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500">
-                    {(item.radius / 1000).toFixed(0)} km
-                  </span>
-                </div>
-                <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-neutral-400">
-                  <MapPin className="h-3 w-3 shrink-0" />
-                  {item.address}
-                </p>
-              </div>
-
-              <div className="flex items-center gap-1.5">
-                <span className="text-xs text-neutral-400">
-                  {formatTime(item.timestamp)}
-                </span>
-                <button
-                  onClick={() => onRemove(item.id)}
-                  className="rounded-full p-1 text-neutral-300 opacity-0 transition-all hover:bg-peach-50 hover:text-peach-500 group-hover:opacity-100"
-                  aria-label="删除记录"
+        <div className="max-h-[calc(100vh-18rem)] min-h-0 overflow-y-auto pr-1 sm:max-h-[calc(100vh-20rem)]">
+          <AnimatePresence mode="popLayout">
+            <div className="space-y-3">
+              {history.map((item) => (
+                <motion.div
+                  key={item.id}
+                  layout
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95 }}
+                  className="group flex items-center gap-3 rounded-2xl bg-background/60 px-4 py-3 transition-colors hover:bg-warm-50"
                 >
-                  <X className="h-3.5 w-3.5" />
-                </button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onReplay(item)}
-                  className="h-7 rounded-full px-3 text-xs text-warm-600 opacity-0 transition-all hover:bg-warm-100 group-hover:opacity-100"
-                >
-                  重搜
-                </Button>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
+                  <div
+                    className={
+                      "flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold " +
+                      TYPE_COLORS[item.schoolType]
+                    }
+                  >
+                    {SchoolTypeLabels[item.schoolType][0]}
+                  </div>
+
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="truncate text-sm font-medium text-neutral-800">
+                        {SchoolTypeLabels[item.schoolType]}
+                      </span>
+                      <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-xs text-neutral-500">
+                        {(item.radius / 1000).toFixed(0)} km
+                      </span>
+                    </div>
+                    <p className="mt-0.5 flex items-center gap-1 truncate text-xs text-neutral-400">
+                      <MapPin className="h-3 w-3 shrink-0" />
+                      {item.address}
+                    </p>
+                  </div>
+
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs text-neutral-400">
+                      {formatTime(item.timestamp)}
+                    </span>
+                    <button
+                      onClick={() => onRemove(item.id)}
+                      className="rounded-full p-1 text-neutral-300 opacity-0 transition-all hover:bg-peach-50 hover:text-peach-500 group-hover:opacity-100"
+                      aria-label="删除记录"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => onReplay(item)}
+                      className="h-7 rounded-full px-3 text-xs text-warm-600 opacity-0 transition-all hover:bg-warm-100 group-hover:opacity-100"
+                    >
+                      重搜
+                    </Button>
+                  </div>
+                </motion.div>
+              ))}
+            </div>
+          </AnimatePresence>
+        </div>
       </div>
     </section>
   );

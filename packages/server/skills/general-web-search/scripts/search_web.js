@@ -132,41 +132,63 @@ function extractCookies(headers) {
   return cookies.join("; ");
 }
 
+// 进程内 cookie 缓存：TTL 90s，避免同一进程内多次并行查询重复预热
+let _sogouCookieCache = null;
+let _sogouCookieExpiry = 0;
+let _sogouCookieInflight = null;
+
 /**
  * 预热搜狗 cookie：访问搜狗视频页拿到 SNUID/SUV 等
- * 参考 wechat-article-search 的 getSogouCookie 实现
+ * 同一进程内缓存 90s，并行调用时只发一次请求（inflight 去重）
  * @returns {Promise<{cookieStr: string, cookieObj: Object}>}
  */
 async function getSogouCookie() {
-  try {
-    const resp = await request({
-      url: "https://v.sogou.com/v?ie=utf8&query=&p=40030600",
-      headers: {
-        Accept:
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-        "Accept-Encoding": "identity",
-        "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
-        "User-Agent": getRandomUserAgent(),
-      },
-      timeoutMs: 10000,
-      retries: 1,
-    });
-
-    const cookies = extractCookies(resp.headers);
-    const cookieObj = {};
-    if (cookies) {
-      cookies.split("; ").forEach((cookie) => {
-        const [key, value] = cookie.split("=");
-        if (key && value) {
-          cookieObj[key.trim()] = value.trim();
-        }
-      });
-    }
-
-    return { cookieStr: cookies || "", cookieObj };
-  } catch {
-    return { cookieStr: "", cookieObj: {} };
+  const now = Date.now();
+  if (_sogouCookieCache && now < _sogouCookieExpiry) {
+    return _sogouCookieCache;
   }
+  if (_sogouCookieInflight) {
+    return _sogouCookieInflight;
+  }
+
+  _sogouCookieInflight = (async () => {
+    try {
+      const resp = await request({
+        url: "https://v.sogou.com/v?ie=utf8&query=&p=40030600",
+        headers: {
+          Accept:
+            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+          "Accept-Encoding": "identity",
+          "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8",
+          "User-Agent": getRandomUserAgent(),
+        },
+        timeoutMs: 10000,
+        retries: 1,
+      });
+
+      const cookies = extractCookies(resp.headers);
+      const cookieObj = {};
+      if (cookies) {
+        cookies.split("; ").forEach((cookie) => {
+          const [key, value] = cookie.split("=");
+          if (key && value) {
+            cookieObj[key.trim()] = value.trim();
+          }
+        });
+      }
+
+      const result = { cookieStr: cookies || "", cookieObj };
+      _sogouCookieCache = result;
+      _sogouCookieExpiry = Date.now() + 90_000;
+      return result;
+    } catch {
+      return { cookieStr: "", cookieObj: {} };
+    } finally {
+      _sogouCookieInflight = null;
+    }
+  })();
+
+  return _sogouCookieInflight;
 }
 
 /**

@@ -1,5 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { getCurrentUser, loginWithEmail, registerWithEmail } from "@/lib/api";
+import {
+  getCurrentUser,
+  loginWithEmail,
+  registerWithEmail,
+  setAuthClearCallback,
+} from "@/lib/api";
 import type { AuthPayload, SessionUser } from "@/types/school";
 
 const STORAGE_KEY = "school-recommender-auth";
@@ -18,29 +23,19 @@ export function useAuth() {
         return;
       }
       const payload = JSON.parse(saved) as AuthPayload;
+
+      // 检查是否过期
+      if (payload.expiresAt && new Date(payload.expiresAt) < new Date()) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        setAuthChecked(true);
+        return;
+      }
+
+      // 未过期则直接使用
       if (payload.token && payload.user) {
-        // 先乐观设置，再向后端验证
         setToken(payload.token);
         setUser(payload.user);
-
-        if (!validatingRef.current) {
-          validatingRef.current = true;
-          getCurrentUser(payload.token)
-            .then((serverUser) => {
-              if (!serverUser) {
-                // 后端不认可该 token，清除本地状态
-                window.localStorage.removeItem(STORAGE_KEY);
-                setToken(null);
-                setUser(null);
-              }
-            })
-            .catch(() => {
-              // 网络错误时保留本地状态，避免误清
-            })
-            .finally(() => {
-              setAuthChecked(true);
-            });
-        }
+        setAuthChecked(true);
       } else {
         setAuthChecked(true);
       }
@@ -94,6 +89,11 @@ export function useAuth() {
     setToken(null);
     setUser(null);
   }, []);
+
+  // 注册 401 回调
+  useEffect(() => {
+    setAuthClearCallback(clearAuth);
+  }, [clearAuth]);
 
   return {
     token,

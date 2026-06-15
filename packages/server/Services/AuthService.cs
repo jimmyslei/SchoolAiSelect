@@ -1,28 +1,30 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Mail;
 using System.Security.Cryptography;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using FreeSql;
 using Microsoft.AspNetCore.Identity;
 using SchoolRecommender.Api.Data;
 using SchoolRecommender.Api.Models;
 using SchoolRecommender.Api.Options;
+using StackExchange.Redis;
 
 namespace SchoolRecommender.Api.Services;
 
 public sealed class AuthService
 {
     private static readonly Regex EmailRegex = new("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
-    private readonly ConcurrentDictionary<string, SessionUser> _sessions = new(StringComparer.Ordinal);
     private readonly IFreeSql _freeSql;
     private readonly SchoolServiceOptions _options;
+    private readonly IConnectionMultiplexer _redis;
     private readonly PasswordHasher<AppUser> _passwordHasher = new();
 
-    public AuthService(IFreeSql freeSql, SchoolServiceOptions options)
+    public AuthService(IFreeSql freeSql, SchoolServiceOptions options, IConnectionMultiplexer redis)
     {
         _freeSql = freeSql;
         _options = options;
+        _redis = redis;
     }
 
     public async Task<AuthResult> SendRegisterCodeAsync(SendRegisterCodeRequest request, CancellationToken cancellationToken)
@@ -131,7 +133,7 @@ public sealed class AuthService
         return AuthResult.Ok(CreateSession(user));
     }
 
-    public SessionUser? GetUserFromRequest(HttpContext httpContext)
+    public async Task<SessionUser?> GetUserFromRequestAsync(HttpContext httpContext)
     {
         var authorization = httpContext.Request.Headers.Authorization.ToString();
         const string prefix = "Bearer ";
@@ -141,15 +143,30 @@ public sealed class AuthService
         }
 
         var token = authorization[prefix.Length..].Trim();
-        return _sessions.TryGetValue(token, out var user) ? user : null;
+        var db = _redis.GetDatabase();
+        var value = await db.StringGetAsync($"session:{token}");
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        return JsonSerializer.Deserialize<SessionUser>(value.ToString());
+    }
+
+    public async Task<SessionUser?> GetAdminUserFromRequestAsync(HttpContext httpContext)
+    {
+        var user = await GetUserFromRequestAsync(httpContext);
+        return user is { IsAdmin: true } ? user : null;
     }
 
     private AuthPayload CreateSession(AppUser user)
     {
         var token = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48));
-        var sessionUser = new SessionUser(user.Id, user.Email, user.DisplayName);
-        _sessions[token] = sessionUser;
-        return new AuthPayload(token, sessionUser);
+        var sessionUser = new SessionUser(user.Id, user.Email, user.DisplayName, user.IsAdmin);
+        var expiresAt = DateTimeOffset.UtcNow.AddDays(7);
+        var db = _redis.GetDatabase();
+        db.StringSet($"session:{token}", JsonSerializer.Serialize(sessionUser), TimeSpan.FromDays(7));
+        return new AuthPayload(token, sessionUser, expiresAt);
     }
 
         private async Task<string?> ValidateVerificationCodeAsync(string email, string code, CancellationToken cancellationToken)

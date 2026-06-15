@@ -1,7 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
+using System.Net;
 using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using SchoolRecommender.Api.Options;
@@ -143,47 +145,250 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         var distinctiveToken = ExtractDistinctiveToken(cleanedName);
         var regionPrefix = ExtractRegionPrefix(region);
 
-        // 将 aspect 转换为具体搜索关键词，追加到查询中，确保每次按不同维度返回差异化结果
-        var aspectKeywords = NormalizeAspectKeywords(aspect);
-        var query = $"{regionPrefix}{cleanedName} {aspectKeywords}".Trim();
-
-        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["query"] = query,
-            ["num"] = 15,
-        };
-
         var scriptName = Path.Combine("scripts", "search_web.js");
         var scriptFullPath = Path.Combine(options.SkillRootPath, "general-web-search", scriptName);
 
+        var candidateQueries = BuildSchoolSearchQueries(regionPrefix, cleanedName, aspect);
+        var mergedResults = new List<SearchResultItem>();
+        string? lastRawText = null;
+
         logger.LogInformation(
-            "Explicit tool invoked. Skill: search_school_info, SchoolName: {SchoolName}, Aspect: {Aspect}, Query: {Query}",
-            schoolName, aspect, query);
-        WriteSkillDebugLog(
-            "EXPLICIT_TOOL_INVOKED",
-            $"Tool=search_school_info; Script={scriptName}; SchoolName={schoolName}; Aspect={aspect}; Query={query}; DistinctiveToken={distinctiveToken}");
+            "Explicit tool invoked. Skill: search_school_info, SchoolName: {SchoolName}, Aspect: {Aspect}, QueryCount: {QueryCount}",
+            schoolName, aspect, candidateQueries.Count);
 
-        var rawResult = await ExecuteScriptAsync(
-            "general-web-search",
-            scriptName.Replace('\\', '/'),
-            scriptFullPath,
-            arguments,
-            cancellationToken).ConfigureAwait(false);
-
-        var rawText = rawResult?.ToString();
-        if (string.IsNullOrWhiteSpace(rawText) || rawText.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+        // 并行发起所有候选查询，拿到足够结果后短路
+        var queryTasks = candidateQueries.Select(async query =>
         {
-            return rawText ?? "(no output)";
+            var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["query"] = query,
+                ["num"] = 15,
+                // 不传 resolve-url：搜狗 /link 跳转解析每条耗时 300-800ms，
+                // 对摘要内容分析无增益，去掉可节省 5-12s
+            };
+
+            WriteSkillDebugLog(
+                "EXPLICIT_TOOL_INVOKED",
+                $"Tool=search_school_info; Script={scriptName}; SchoolName={schoolName}; Aspect={aspect}; Query={query}; DistinctiveToken={distinctiveToken}");
+
+            var rawResult = await ExecuteScriptAsync(
+                "general-web-search",
+                scriptName.Replace('\\', '/'),
+                scriptFullPath,
+                arguments,
+                cancellationToken).ConfigureAwait(false);
+
+            return (query, rawText: rawResult?.ToString());
+        }).ToList();
+
+        await Task.WhenAll(queryTasks).ConfigureAwait(false);
+
+        foreach (var t in queryTasks)
+        {
+            var (query, rawText) = t.Result;
+            if (string.IsNullOrWhiteSpace(rawText) || rawText.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+            {
+                lastRawText ??= rawText;
+                continue;
+            }
+
+            lastRawText = rawText;
+
+            var filtered = FilterRelevantSchoolResults(rawText, cleanedName, distinctiveToken, schoolName);
+
+            WriteSkillDebugLog(
+                "SCHOOL_SEARCH_FILTERED",
+                $"SchoolName={schoolName}; DistinctiveToken={distinctiveToken}; Query={query}; Kept={filtered.keptCount}/{filtered.totalCount}");
+
+            mergedResults.AddRange(ParseSearchResultItems(filtered.json, query));
         }
 
-        // 相关性过滤：只保留 title/snippet 命中校名特征的条目
-        var filtered = FilterRelevantSchoolResults(rawText, cleanedName, distinctiveToken, schoolName);
+        var rankedResults = RankSearchResults(mergedResults, cleanedName, aspect, 12);
+        if (rankedResults.Count > 0)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                schoolName,
+                aspect,
+                total = rankedResults.Count,
+                results = rankedResults,
+            }, FilteredResultJsonOptions);
+        }
 
-        WriteSkillDebugLog(
-            "SCHOOL_SEARCH_FILTERED",
-            $"SchoolName={schoolName}; DistinctiveToken={distinctiveToken}; Kept={filtered.keptCount}/{filtered.totalCount}");
+        return string.IsNullOrWhiteSpace(lastRawText)
+            ? JsonSerializer.Serialize(new
+            {
+                note = $"未检索到与 \"{schoolName}\" 相关的公开网页。",
+                attemptedQueries = candidateQueries,
+                results = Array.Empty<object>(),
+            }, FilteredResultJsonOptions)
+            : lastRawText;
+    }
 
-        return filtered.json;
+    /// <summary>
+    /// 通用联网搜索。针对录取分数线/排名类查询自动补充变体，提高命中率，并优先保留教育局/学校官网/招生相关结果。
+    /// </summary>
+    public async Task<string> SearchGeneralWebAsync(string query, int? num, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return "Error: query 不能为空";
+        }
+
+        var maxResults = Math.Clamp(num ?? 10, 1, 20);
+        var searchQueries = BuildGeneralSearchQueries(query);
+        var scriptName = Path.Combine("scripts", "search_web.js");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "general-web-search", scriptName);
+        var mergedResults = new List<SearchResultItem>();
+        string? lastRawText = null;
+
+        logger.LogInformation(
+            "Explicit tool invoked. Tool: search_web, Query: {Query}, VariantCount: {VariantCount}",
+            query,
+            searchQueries.Count);
+
+        // 并行发起所有查询变体，不传 resolve-url（搜狗跳转解析每条 300-800ms，对摘要分析无增益）
+        var generalQueryTasks = searchQueries.Select(async candidateQuery =>
+        {
+            var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["query"] = candidateQuery,
+                ["num"] = Math.Max(maxResults, 12),
+            };
+
+            WriteSkillDebugLog(
+                "EXPLICIT_TOOL_INVOKED",
+                $"Tool=search_web; Script={scriptName}; Query={candidateQuery}; Max={maxResults}");
+
+            var rawResult = await ExecuteScriptAsync(
+                "general-web-search",
+                scriptName.Replace('\\', '/'),
+                scriptFullPath,
+                arguments,
+                cancellationToken).ConfigureAwait(false);
+
+            return (candidateQuery, rawText: rawResult?.ToString());
+        }).ToList();
+
+        await Task.WhenAll(generalQueryTasks).ConfigureAwait(false);
+
+        foreach (var t in generalQueryTasks)
+        {
+            var (candidateQuery, rawText) = t.Result;
+            if (string.IsNullOrWhiteSpace(rawText) || rawText.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+            {
+                lastRawText ??= rawText;
+                continue;
+            }
+
+            lastRawText = rawText;
+            mergedResults.AddRange(ParseSearchResultItems(rawText, candidateQuery));
+        }
+
+        var rankedResults = RankSearchResults(mergedResults, query, aspect: null, maxResults);
+        if (rankedResults.Count > 0)
+        {
+            return JsonSerializer.Serialize(new
+            {
+                query = query.Trim(),
+                expandedQueries = searchQueries,
+                total = rankedResults.Count,
+                results = rankedResults,
+            }, FilteredResultJsonOptions);
+        }
+
+        var wechatFallback = await TryBuildWechatFallbackForGeneralSearchAsync(query, maxResults, cancellationToken).ConfigureAwait(false);
+        if (wechatFallback is not null)
+        {
+            return wechatFallback;
+        }
+
+        return string.IsNullOrWhiteSpace(lastRawText)
+            ? JsonSerializer.Serialize(new
+            {
+                note = $"未检索到与 \"{query.Trim()}\" 相关的公开网页。",
+                expandedQueries = searchQueries,
+                results = Array.Empty<object>(),
+            }, FilteredResultJsonOptions)
+            : lastRawText;
+    }
+
+    /// <summary>
+    /// 读取公开网页正文，供 Agent 基于搜索结果中的链接继续提取录取分数线等细节。
+    /// 返回 JSON：{ url, title, content, contentLength }。
+    /// </summary>
+    public async Task<string> FetchWebpageContentAsync(string url, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return "Error: url 不能为空";
+        }
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
+        {
+            return "Error: url 必须是合法的 http/https 链接";
+        }
+
+        try
+        {
+            using var handler = new HttpClientHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
+            };
+            using var httpClient = new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(Math.Max(10, options.SkillTimeout.TotalSeconds)),
+            };
+
+            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent",
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
+            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Accept",
+                "text/html,application/xhtml+xml,application/xml;q=0.9,text/plain;q=0.8,*/*;q=0.7");
+            httpClient.DefaultRequestHeaders.TryAddWithoutValidation("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8");
+
+            logger.LogInformation("Explicit tool invoked. Tool: fetch_webpage_content, Url: {Url}", url);
+            WriteSkillDebugLog("EXPLICIT_TOOL_INVOKED", $"Tool=fetch_webpage_content; Url={url}");
+
+            using var response = await httpClient.GetAsync(uri, cancellationToken).ConfigureAwait(false);
+            var mediaType = response.Content.Headers.ContentType?.MediaType;
+            var rawContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                return JsonSerializer.Serialize(new
+                {
+                    url,
+                    status = (int)response.StatusCode,
+                    error = $"HTTP {(int)response.StatusCode}",
+                    content = TruncateFetchedContent(rawContent),
+                }, FilteredResultJsonOptions);
+            }
+
+            var extracted = ExtractReadableContent(rawContent, mediaType);
+            var admissionScoreHints = ExtractAdmissionScoreHints(extracted.content);
+            return JsonSerializer.Serialize(new
+            {
+                url,
+                title = extracted.title,
+                content = extracted.content,
+                contentLength = extracted.content.Length,
+                admissionScoreHints,
+            }, FilteredResultJsonOptions);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Fetch webpage content failed: {Url}", url);
+            return JsonSerializer.Serialize(new
+            {
+                url,
+                error = ex.Message,
+            }, FilteredResultJsonOptions);
+        }
     }
 
     private static string CleanSchoolName(string name)
@@ -250,14 +455,375 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
 
         return aspect.Trim() switch
         {
+            "录取分数线" or "分数线" or "录取线" or "admission" => "录取分数线 中考录取线 统招线 最低录取分 招生简章",
             "师资" or "teaching" => "师资 教师 教学质量",
             "评价" or "口碑" or "reputation" => "家长 评价 口碑 怎么样",
             "招生" or "enrollment" => "招生 学区 划片 收费",
+            "排名" or "ranking" => "排名 重点高中 省级示范 百强",
             "活动" or "校园活动" or "activity" => "活动 比赛 获奖 校园",
             "新闻" or "news" => "新闻 公告 官网",
             _ => aspect.Trim() + " 评价 家长",
         };
     }
+
+    private static List<string> BuildSchoolSearchQueries(string regionPrefix, string cleanedName, string? aspect)
+    {
+        var queries = new List<string>();
+        var basePrefix = string.IsNullOrWhiteSpace(regionPrefix) ? string.Empty : regionPrefix + " ";
+        var normalizedAspect = NormalizeAspectKeywords(aspect);
+
+        queries.Add($"{basePrefix}{cleanedName} {normalizedAspect}".Trim());
+
+        if (string.Equals(aspect?.Trim(), "录取分数线", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(aspect?.Trim(), "分数线", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(aspect?.Trim(), "录取线", StringComparison.OrdinalIgnoreCase))
+        {
+            queries.Add($"{basePrefix}{cleanedName} 中考录取分数线 2025 2024 2023".Trim());
+            queries.Add($"{basePrefix}{cleanedName} 招生简章 统招线".Trim());
+            queries.Add($"{basePrefix}{cleanedName} 教育局 录取线".Trim());
+        }
+        else if (string.Equals(aspect?.Trim(), "评价", StringComparison.OrdinalIgnoreCase))
+        {
+            queries.Add($"{basePrefix}{cleanedName} 学校评价 办学特色".Trim());
+        }
+        else if (string.Equals(aspect?.Trim(), "排名", StringComparison.OrdinalIgnoreCase))
+        {
+            queries.Add($"{basePrefix}{cleanedName} 排名 重点高中".Trim());
+        }
+
+        return queries
+            .Where(q => !string.IsNullOrWhiteSpace(q))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(4)
+            .ToList();
+    }
+
+    private static List<string> BuildGeneralSearchQueries(string query)
+    {
+        var trimmed = query.Trim();
+        var queries = new List<string> { trimmed };
+
+        if (trimmed.Length >= 4 && !trimmed.Contains('"'))
+        {
+            queries.Add($"\"{trimmed}\"");
+        }
+
+        if (trimmed.Contains("录取分数线", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("录取线", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("中考", StringComparison.OrdinalIgnoreCase))
+        {
+            queries.Add($"{trimmed} 官网 教育局");
+            queries.Add($"{trimmed} 招生简章 统招线");
+            queries.Add($"{trimmed} 2025 2024 2023 教育局");
+        }
+        else if (trimmed.Contains("排名", StringComparison.OrdinalIgnoreCase)
+            || trimmed.Contains("重点高中", StringComparison.OrdinalIgnoreCase))
+        {
+            queries.Add($"{trimmed} 省级示范高中");
+            queries.Add($"{trimmed} 百强 高中名单");
+            queries.Add($"{trimmed} 教育局 官方名单");
+        }
+        else
+        {
+            queries.Add($"{trimmed} 官网");
+            queries.Add($"{trimmed} 教育局");
+            queries.Add($"{trimmed} 招生简章");
+        }
+
+        return queries
+            .Where(q => !string.IsNullOrWhiteSpace(q))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(5)
+            .ToList();
+    }
+
+    private async Task<string?> TryBuildWechatFallbackForGeneralSearchAsync(
+        string query,
+        int maxResults,
+        CancellationToken cancellationToken)
+    {
+        var wechatRaw = await SearchWechatArticlesAsync(query, Math.Min(maxResults, 10), region: null, cancellationToken).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(wechatRaw) || wechatRaw.StartsWith("Error", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(wechatRaw);
+            if (!doc.RootElement.TryGetProperty("articles", out var articles)
+                || articles.ValueKind != JsonValueKind.Array)
+            {
+                return null;
+            }
+
+            var results = new List<object>();
+            foreach (var article in articles.EnumerateArray())
+            {
+                var title = article.TryGetProperty("title", out var titleProp) ? titleProp.GetString() ?? string.Empty : string.Empty;
+                var url = article.TryGetProperty("url", out var urlProp) ? urlProp.GetString() ?? string.Empty : string.Empty;
+                var snippet = article.TryGetProperty("summary", out var summaryProp) ? summaryProp.GetString() ?? string.Empty : string.Empty;
+                var source = article.TryGetProperty("source", out var sourceProp) ? sourceProp.GetString() : null;
+                var dateDescription = article.TryGetProperty("date_description", out var dateProp) ? dateProp.GetString() : null;
+
+                if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                results.Add(new
+                {
+                    title,
+                    url,
+                    snippet,
+                    source,
+                    engine = "wechat",
+                    queryVariant = query.Trim(),
+                    dateDescription,
+                });
+
+                if (results.Count >= maxResults)
+                {
+                    break;
+                }
+            }
+
+            if (results.Count == 0)
+            {
+                return null;
+            }
+
+            return JsonSerializer.Serialize(new
+            {
+                query = query.Trim(),
+                expandedQueries = BuildGeneralSearchQueries(query),
+                total = results.Count,
+                fallback = "wechat-article-search",
+                note = "通用网页搜索结果不足，已自动补充微信公众号文章结果。",
+                results,
+            }, FilteredResultJsonOptions);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static (string title, string content) ExtractReadableContent(string rawContent, string? mediaType)
+    {
+        if (string.IsNullOrWhiteSpace(rawContent))
+        {
+            return (string.Empty, string.Empty);
+        }
+
+        if (string.Equals(mediaType, "text/plain", StringComparison.OrdinalIgnoreCase))
+        {
+            var text = NormalizeWhitespace(rawContent);
+            return (string.Empty, TruncateFetchedContent(text));
+        }
+
+        var titleMatch = Regex.Match(rawContent, @"<title[^>]*>(.*?)</title>", RegexOptions.IgnoreCase | RegexOptions.Singleline);
+        var title = NormalizeWhitespace(WebUtility.HtmlDecode(titleMatch.Success ? titleMatch.Groups[1].Value : string.Empty));
+
+        var cleaned = Regex.Replace(rawContent, @"<script\b[^<]*(?:(?!</script>)<[^<]*)*</script>", " ", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"<style\b[^<]*(?:(?!</style>)<[^<]*)*</style>", " ", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"<noscript\b[^<]*(?:(?!</noscript>)<[^<]*)*</noscript>", " ", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"<svg\b[^<]*(?:(?!</svg>)<[^<]*)*</svg>", " ", RegexOptions.IgnoreCase);
+        cleaned = Regex.Replace(cleaned, @"<[^>]+>", " ");
+        cleaned = WebUtility.HtmlDecode(cleaned);
+        cleaned = NormalizeWhitespace(cleaned);
+
+        return (title, TruncateFetchedContent(cleaned));
+    }
+
+    private static string NormalizeWhitespace(string text)
+        => Regex.Replace(text ?? string.Empty, @"\s+", " ").Trim();
+
+    private static string TruncateFetchedContent(string text)
+    {
+        const int maxLength = 8000;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return string.Empty;
+        }
+
+        return text.Length <= maxLength
+            ? text
+            : text[..maxLength] + " …[truncated]";
+    }
+
+    private static IReadOnlyList<object> ExtractAdmissionScoreHints(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return Array.Empty<object>();
+        }
+
+        var hints = new List<object>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var matches = Regex.Matches(
+            text,
+            @"(?<year>20\d{2}|19\d{2})[^。；\n]{0,40}?(?<score>\d{3})(?:分)?[^。；\n]{0,60}?(录取|分数线|统招线|最低录取|投档线|中考)",
+            RegexOptions.IgnoreCase);
+
+        foreach (Match match in matches)
+        {
+            if (!match.Success)
+            {
+                continue;
+            }
+
+            var year = match.Groups["year"].Value;
+            var score = match.Groups["score"].Value;
+            var snippet = NormalizeWhitespace(match.Value);
+            if (string.IsNullOrWhiteSpace(year)
+                || string.IsNullOrWhiteSpace(score)
+                || snippet.Length == 0)
+            {
+                continue;
+            }
+
+            var key = $"{year}:{score}:{snippet}";
+            if (!seen.Add(key))
+            {
+                continue;
+            }
+
+            hints.Add(new
+            {
+                year,
+                score,
+                snippet,
+            });
+
+            if (hints.Count >= 12)
+            {
+                break;
+            }
+        }
+
+        return hints;
+    }
+
+    private static List<SearchResultItem> ParseSearchResultItems(string rawJson, string queryVariant)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(rawJson);
+            JsonElement itemsArray;
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                itemsArray = doc.RootElement;
+            }
+            else if (doc.RootElement.ValueKind == JsonValueKind.Object
+                && doc.RootElement.TryGetProperty("results", out var resultsProp)
+                && resultsProp.ValueKind == JsonValueKind.Array)
+            {
+                itemsArray = resultsProp;
+            }
+            else
+            {
+                return [];
+            }
+
+            var results = new List<SearchResultItem>();
+            foreach (var item in itemsArray.EnumerateArray())
+            {
+                var title = item.TryGetProperty("title", out var titleProp) ? titleProp.GetString() ?? string.Empty : string.Empty;
+                var url = item.TryGetProperty("url", out var urlProp) ? urlProp.GetString() ?? string.Empty : string.Empty;
+                var snippet = item.TryGetProperty("snippet", out var snippetProp) ? snippetProp.GetString() ?? string.Empty
+                    : item.TryGetProperty("summary", out var summaryProp) ? summaryProp.GetString() ?? string.Empty
+                    : string.Empty;
+                var source = item.TryGetProperty("source", out var sourceProp) ? sourceProp.GetString() : null;
+                var engine = item.TryGetProperty("engine", out var engineProp) ? engineProp.GetString() : null;
+
+                if (string.IsNullOrWhiteSpace(title) || string.IsNullOrWhiteSpace(url))
+                {
+                    continue;
+                }
+
+                results.Add(new SearchResultItem(title, url, snippet, source, engine, queryVariant));
+            }
+
+            return results;
+        }
+        catch (JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static List<object> RankSearchResults(IEnumerable<SearchResultItem> items, string focusText, string? aspect, int maxResults)
+    {
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var focusTokens = focusText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+        return items
+            .Where(item => !string.IsNullOrWhiteSpace(item.Url) && !string.IsNullOrWhiteSpace(item.Title))
+            .OrderByDescending(item => ComputeSearchResultScore(item, focusTokens, aspect))
+            .ThenBy(item => item.QueryVariant.Length)
+            .Where(item => seenUrls.Add(item.Url))
+            .Take(maxResults)
+            .Select(item => new
+            {
+                title = item.Title,
+                url = item.Url,
+                snippet = item.Snippet,
+                source = item.Source,
+                engine = item.Engine,
+                queryVariant = item.QueryVariant,
+            })
+            .Cast<object>()
+            .ToList();
+    }
+
+    private static int ComputeSearchResultScore(SearchResultItem item, IReadOnlyList<string> focusTokens, string? aspect)
+    {
+        var text = $"{item.Title} {item.Snippet} {item.Source}";
+        var score = 0;
+
+        foreach (var token in focusTokens.Where(static token => token.Length >= 2))
+        {
+            if (text.Contains(token, StringComparison.OrdinalIgnoreCase))
+            {
+                score += 6;
+            }
+        }
+
+        if (text.Contains("官网", StringComparison.OrdinalIgnoreCase)
+            || item.Url.Contains("gov.cn", StringComparison.OrdinalIgnoreCase)
+            || item.Url.Contains("edu.cn", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 10;
+        }
+
+        if (aspect is not null && aspect.Contains("录取", StringComparison.OrdinalIgnoreCase))
+        {
+            if (text.Contains("录取", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("分数线", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("统招线", StringComparison.OrdinalIgnoreCase)
+                || text.Contains("招生简章", StringComparison.OrdinalIgnoreCase))
+            {
+                score += 12;
+            }
+        }
+
+        if (item.Url.Contains("zhihu.com", StringComparison.OrdinalIgnoreCase)
+            || item.Url.Contains("sohu.com", StringComparison.OrdinalIgnoreCase))
+        {
+            score -= 6;
+        }
+
+        return score;
+    }
+
+    private sealed record SearchResultItem(
+        string Title,
+        string Url,
+        string Snippet,
+        string? Source,
+        string? Engine,
+        string QueryVariant);
 
     private static (string json, int keptCount, int totalCount) FilterRelevantSchoolResults(
         string rawJson,

@@ -11,6 +11,8 @@ import type {
   SearchRequest,
   SearchResponse,
   SessionUser,
+  SiteMessageReply,
+  SiteMessageThread,
   UniversityAnalysis,
   UniversityRanking,
   UniversitySearchRequest,
@@ -18,11 +20,21 @@ import type {
 
 const API_BASE = "/api";
 
+let authClearCallback: (() => void) | null = null;
+
+export function setAuthClearCallback(callback: () => void) {
+  authClearCallback = callback;
+}
+
 function authHeaders(token?: string): HeadersInit {
   return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 async function readApiResponse<T>(res: Response, fallback: string): Promise<T> {
+  if (res.status === 401) {
+    authClearCallback?.();
+    throw new Error("登录已过期，请重新登录");
+  }
   const json = await res.json();
   if (!res.ok || !json.success) {
     throw new Error(json.message || fallback);
@@ -109,6 +121,36 @@ export async function createMessageReply(
     body: JSON.stringify({ content }),
   });
   return readApiResponse<MessageReply>(res, "回复留言失败");
+}
+
+export async function fetchSiteMessages(): Promise<SiteMessageThread[]> {
+  const res = await fetch(`${API_BASE}/site-messages`);
+  return readApiResponse<SiteMessageThread[]>(res, "获取留言失败");
+}
+
+export async function createSiteMessage(
+  token: string,
+  content: string,
+): Promise<SiteMessageThread> {
+  const res = await fetch(`${API_BASE}/site-messages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ content }),
+  });
+  return readApiResponse<SiteMessageThread>(res, "发布留言失败");
+}
+
+export async function createSiteMessageReply(
+  token: string,
+  messageId: number,
+  content: string,
+): Promise<SiteMessageReply> {
+  const res = await fetch(`${API_BASE}/site-messages/${messageId}/replies`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...authHeaders(token) },
+    body: JSON.stringify({ content }),
+  });
+  return readApiResponse<SiteMessageReply>(res, "回复留言失败");
 }
 
 export async function searchSchools(
@@ -583,4 +625,74 @@ export async function* recommendHighSchoolsStream(
       // ignore
     }
   }
+}
+
+// ═══════════════════════════════════════════════════════════
+// 历史分析记录
+// ═══════════════════════════════════════════════════════════
+
+export type HistorySessionType = "school" | "university" | "highschool";
+
+export interface AnalysisHistoryItem {
+  id: number;
+  sessionType: HistorySessionType;
+  title: string;
+  summary?: string;
+  createdAt: string; // ISO 8601
+}
+
+export interface AnalysisHistoryDetail extends AnalysisHistoryItem {
+  requestJson: string;
+  resultJson: string;
+}
+
+export interface AnalysisHistoryListResult {
+  items: AnalysisHistoryItem[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function getAnalysisHistory(
+  token: string,
+  page = 1,
+  pageSize = 20,
+): Promise<AnalysisHistoryListResult> {
+  const params = new URLSearchParams({
+    page: String(page),
+    pageSize: String(pageSize),
+  });
+  const res = await fetch(`${API_BASE}/history?${params}`, {
+    headers: { ...authHeaders(token) },
+  });
+  return readApiResponse<AnalysisHistoryListResult>(res, "获取历史记录失败");
+}
+
+export async function getAnalysisHistoryDetail(
+  id: number,
+  token: string,
+): Promise<AnalysisHistoryDetail> {
+  const res = await fetch(`${API_BASE}/history/${id}`, {
+    headers: { ...authHeaders(token) },
+  });
+  return readApiResponse<AnalysisHistoryDetail>(res, "获取历史记录详情失败");
+}
+
+export async function deleteAnalysisHistory(
+  id: number,
+  token: string,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}/history/${id}`, {
+    method: "DELETE",
+    headers: { ...authHeaders(token) },
+  });
+  await readApiResponse<unknown>(res, "删除历史记录失败");
+}
+
+export async function deleteAllAnalysisHistory(token: string): Promise<void> {
+  const res = await fetch(`${API_BASE}/history`, {
+    method: "DELETE",
+    headers: { ...authHeaders(token) },
+  });
+  await readApiResponse<unknown>(res, "清空历史记录失败");
 }

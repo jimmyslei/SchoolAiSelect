@@ -23,11 +23,17 @@ public sealed record RegisterRequest(string Email, string Password, string Displ
 
 public sealed record LoginRequest(string Email, string Password);
 
-public sealed record SessionUser(long Id, string Email, string DisplayName);
+public sealed record SessionUser(long Id, string Email, string DisplayName, bool IsAdmin = false);
 
-public sealed record AuthPayload(string Token, SessionUser User);
+public sealed record AuthPayload(string Token, SessionUser User, DateTimeOffset ExpiresAt);
 
 public sealed record CreateMessageRequest(string SchoolId, string SchoolName, string Content);
+
+public sealed record CreateSiteMessageRequest(string Content);
+
+public sealed record SiteMessageReplyDto(long Id, long MessageId, long UserId, string AuthorName, bool IsAdmin, string Content, DateTimeOffset CreatedAt);
+
+public sealed record SiteMessageThread(long Id, long UserId, string AuthorName, string Content, DateTimeOffset CreatedAt, IReadOnlyList<SiteMessageReplyDto> Replies);
 
 public sealed record CreateReplyRequest(string Content);
 
@@ -187,7 +193,7 @@ public sealed record HighSchoolRecommendRequest(
     string Province);
 
 /// <summary>高中单年录取分数线</summary>
-public sealed record HighSchoolAdmissionYear(int Year, int Score);
+public sealed record HighSchoolAdmissionYear(int Year, double Score);
 
 /// <summary>高中择校推荐项（单所高中）</summary>
 public sealed record HighSchoolRecommendation(
@@ -204,10 +210,32 @@ public sealed record HighSchoolRecommendation(
     string? SchoolFeatures,     // 学校特色，如"理科见长""外语特色""艺术体育强校"
     string? TeachingStaffInfo,  // 师资概况，如"特级教师5人，高级教师占比60%"
     string? KeyDisciplines,     // 优势学科，如"数学、物理"
-    int? StudentCount,          // 在校学生规模
+    string? StudentCount,          // 在校学生规模
     string? Address,            // 学校详细地址
     string? Website,            // 学校官网
-    int? EnrollmentPlan,        // 最新一年招生计划人数
+    string? EnrollmentPlan,        // 最新一年招生计划人数
     string? EnrollmentNote,     // 招生备注，如"面向全市招生""有住宿"
-    int MinAdmissionScore,      // 近年最低录取线
-    int MaxAdmissionScore);     // 近年最高录取线
+    double MinAdmissionScore,      // 近年最低录取线
+    double MaxAdmissionScore);     // 近年最高录取线
+
+// ═══════════════════════════════════════════════════════════
+// 历史分析记录
+// ═══════════════════════════════════════════════════════════
+
+/// <summary>历史记录列表项（不含完整结果）</summary>
+public sealed record AnalysisHistoryItem(
+    long Id,
+    string SessionType,
+    string Title,
+    string? Summary,
+    DateTimeOffset CreatedAt);
+
+/// <summary>历史记录详情（含完整 done 结果 JSON）</summary>
+public sealed record AnalysisHistoryDetail(
+    long Id,
+    string SessionType,
+    string Title,
+    string? Summary,
+    string RequestJson,
+    string ResultJson,
+    DateTimeOffset CreatedAt);

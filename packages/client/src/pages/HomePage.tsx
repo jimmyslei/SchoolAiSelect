@@ -1,5 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import { MapPin, RotateCcw, GraduationCap } from "lucide-react";
+import { motion } from "framer-motion";
+import { MapPin, RotateCcw, GraduationCap, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { AuthDialog } from "@/components/auth/AuthDialog";
@@ -20,6 +21,7 @@ import { ComparisonBarChart } from "@/components/results/BarChart";
 import { StepIndicator } from "@/components/shared/StepIndicator";
 import { ShareButton } from "@/components/shared/ShareButton";
 import { MessageBoard } from "@/components/messages/MessageBoard";
+import { SiteMessageBoard } from "@/components/messages/SiteMessageBoard";
 import { Button } from "@/components/ui/button";
 import { geocodeAddress, trackSiteVisit } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -362,10 +364,7 @@ export function HomePage() {
   }, [geoStatus, currentStep, location, handleLocationSuccess]);
 
   useEffect(() => {
-    if (
-      (searchStatus === "streaming" || searchStatus === "success") &&
-      currentStep === 2
-    ) {
+    if (searchStatus === "success" && currentStep === 2) {
       setCurrentStep(3);
     }
   }, [searchStatus, currentStep]);
@@ -618,7 +617,12 @@ export function HomePage() {
               )}
 
               {currentStep === 2 && selectedType && (
-                <SearchingView schoolType={selectedType} />
+                <SearchingView
+                  schoolType={selectedType}
+                  rankings={rankings}
+                  analyzedCount={analyzedCount}
+                  totalCount={totalCount}
+                />
               )}
 
               {currentStep === 3 && selectedType && (
@@ -700,17 +704,11 @@ export function HomePage() {
               )}
 
               {uniStep === 1 && (
-                <div className="flex flex-col items-center gap-4 py-12">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-purple-100">
-                    <GraduationCap className="h-8 w-8 animate-pulse text-purple-600" />
-                  </div>
-                  <p className="text-lg font-medium text-neutral-700">
-                    AI 正在分析大学录取数据...
-                  </p>
-                  <p className="text-sm text-neutral-500">
-                    已分析 {uniAnalyzedCount}/{uniTotalCount} 所大学
-                  </p>
-                </div>
+                <AiAnalyzingView
+                  title="AI 正在分析大学录取数据"
+                  subtitle={`已分析 ${uniAnalyzedCount}/${uniTotalCount} 所大学`}
+                  color="purple"
+                />
               )}
 
               {uniStep === 2 && (
@@ -719,6 +717,7 @@ export function HomePage() {
                   analysesMap={uniAnalysesMap}
                   analyzedCount={uniAnalyzedCount}
                   totalCount={uniTotalCount}
+                  studentScore={uniStudentScore}
                   onReset={handleUniversityReset}
                 />
               )}
@@ -778,17 +777,11 @@ export function HomePage() {
               )}
 
               {hsStep === 1 && (
-                <div className="flex flex-col items-center gap-4 py-12">
-                  <div className="flex h-16 w-16 items-center justify-center rounded-full bg-green-100">
-                    <GraduationCap className="h-8 w-8 animate-pulse text-green-600" />
-                  </div>
-                  <p className="text-lg font-medium text-neutral-700">
-                    AI 正在分析高中录取数据...
-                  </p>
-                  <p className="text-sm text-neutral-500">
-                    正在搜索 {hsProvince} 的高中学校及近年录取分数线
-                  </p>
-                </div>
+                <AiAnalyzingView
+                  title="AI 正在分析高中录取数据"
+                  subtitle={`正在搜索 ${hsProvince} 的高中学校及近年录取分数线`}
+                  color="green"
+                />
               )}
 
               {hsStep === 2 && hsRecommendations.length > 0 && (
@@ -836,7 +829,115 @@ export function HomePage() {
         onRegister={auth.register}
       />
 
+      <SiteMessageBoard
+        token={auth.token}
+        user={auth.user}
+        onRequireAuth={() => setAuthDialogOpen(true)}
+      />
+
       {!isInFlow && !isInUniFlow && !isInHsFlow && <Footer />}
     </div>
+  );
+}
+
+// ─── AI 分析等待视图 ──────────────────────────────────────
+
+interface AiAnalyzingViewProps {
+  title: string;
+  subtitle: string;
+  color: "purple" | "green";
+}
+
+function AiAnalyzingView({ title, subtitle, color }: AiAnalyzingViewProps) {
+  const ring =
+    color === "purple" ? "border-purple-300/80" : "border-green-300/80";
+  const ring2 =
+    color === "purple" ? "border-purple-200/70" : "border-green-200/70";
+  const ring3 =
+    color === "purple" ? "border-purple-200/50" : "border-green-200/50";
+  const bg = color === "purple" ? "bg-purple-50" : "bg-green-50";
+  const iconColor = color === "purple" ? "text-purple-600" : "text-green-600";
+  const loaderColor = color === "purple" ? "text-purple-400" : "text-green-400";
+  const dotColor = color === "purple" ? "bg-purple-400" : "bg-green-400";
+  const subtitleBg =
+    color === "purple"
+      ? "bg-purple-50/80 text-purple-700"
+      : "bg-green-50/80 text-green-700";
+
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 12 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="mx-auto flex max-w-md flex-col items-center gap-6 py-14"
+    >
+      {/* 脉冲扩散圆圈 + 图标 */}
+      <div className="relative flex items-center justify-center">
+        <motion.span
+          aria-hidden
+          className={`absolute h-24 w-24 rounded-full border-2 ${ring}`}
+          animate={{ scale: [1, 1.85], opacity: [0.65, 0] }}
+          transition={{ duration: 2, repeat: Infinity, ease: "easeOut" }}
+        />
+        <motion.span
+          aria-hidden
+          className={`absolute h-24 w-24 rounded-full border-2 ${ring2}`}
+          animate={{ scale: [1, 2.2], opacity: [0.5, 0] }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: "easeOut",
+            delay: 0.4,
+          }}
+        />
+        <motion.span
+          aria-hidden
+          className={`absolute h-24 w-24 rounded-full border ${ring3}`}
+          animate={{ scale: [1, 2.55], opacity: [0.35, 0] }}
+          transition={{
+            duration: 2,
+            repeat: Infinity,
+            ease: "easeOut",
+            delay: 0.8,
+          }}
+        />
+        <div
+          className={`relative flex h-20 w-20 items-center justify-center rounded-full ${bg} shadow-sm`}
+        >
+          <div className="absolute inset-0 rounded-full">
+            <Loader2
+              className={`absolute left-1/2 top-1/2 h-full w-full -translate-x-1/2 -translate-y-1/2 scale-[1.08] animate-spin opacity-20 ${loaderColor}`}
+            />
+          </div>
+          <GraduationCap className={`relative h-9 w-9 ${iconColor}`} />
+        </div>
+      </div>
+
+      {/* 文案 */}
+      <div className="flex flex-col items-center gap-2 text-center">
+        <div className="flex items-center gap-2 text-lg font-semibold text-neutral-800">
+          <span>{title}</span>
+          <div className="flex items-center gap-1">
+            {[0, 1, 2].map((dot) => (
+              <motion.span
+                key={dot}
+                className={`h-1.5 w-1.5 rounded-full ${dotColor}`}
+                animate={{ y: [0, -5, 0], opacity: [0.3, 1, 0.3] }}
+                transition={{
+                  duration: 1.1,
+                  repeat: Infinity,
+                  ease: "easeInOut",
+                  delay: dot * 0.18,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+        <span
+          className={`rounded-full px-4 py-1.5 text-sm leading-6 ${subtitleBg}`}
+        >
+          {subtitle}
+        </span>
+      </div>
+    </motion.div>
   );
 }

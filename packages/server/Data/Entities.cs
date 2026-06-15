@@ -115,6 +115,9 @@ public sealed class AppUser
     [Column(Name = nameof(PasswordHash), StringLength = 512, IsNullable = false)]
     public string PasswordHash { get; set; } = string.Empty;
 
+    [Column(Name = nameof(IsAdmin), IsNullable = false)]
+    public bool IsAdmin { get; set; }
+
     [Column(Name = nameof(CreatedAt), IsNullable = false)]
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
@@ -141,6 +144,42 @@ public sealed class EmailVerificationCode
     public DateTime? UsedAt { get; set; }
 }
 
+/// <summary>用户分析历史记录，支持三种类型：school / university / highschool</summary>
+[Table(Name = "analysis_histories")]
+[Index("idx_history_user_created", $"{nameof(UserId)}, {nameof(CreatedAt)}", false)]
+[Index("idx_history_session", nameof(SessionType), false)]
+public sealed class AnalysisHistory
+{
+    [Column(Name = nameof(Id), IsPrimary = true, IsIdentity = true)]
+    public long Id { get; set; }
+
+    [Column(Name = nameof(UserId), IsNullable = false)]
+    public long UserId { get; set; }
+
+    /// <summary>school | university | highschool</summary>
+    [Column(Name = nameof(SessionType), StringLength = 32, IsNullable = false)]
+    public string SessionType { get; set; } = string.Empty;
+
+    /// <summary>展示用标题，如 "北京朝阳区·初中" 或 "清华大学 580分"</summary>
+    [Column(Name = nameof(Title), StringLength = 256, IsNullable = false)]
+    public string Title { get; set; } = string.Empty;
+
+    /// <summary>请求参数 JSON（序列化原始 request）</summary>
+    [Column(Name = nameof(RequestJson), StringLength = -1, IsNullable = false)]
+    public string RequestJson { get; set; } = string.Empty;
+
+    /// <summary>完整 done 事件 payload JSON</summary>
+    [Column(Name = nameof(ResultJson), StringLength = -1, IsNullable = false)]
+    public string ResultJson { get; set; } = string.Empty;
+
+    /// <summary>简要摘要，如 "共分析 12 所学校" </summary>
+    [Column(Name = nameof(Summary), StringLength = 512, IsNullable = true)]
+    public string? Summary { get; set; }
+
+    [Column(Name = nameof(CreatedAt), IsNullable = false)]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 [Index("idx_message_school_created", $"{nameof(SchoolId)}, {nameof(CreatedAt)}", false)]
 public sealed class Message
 {
@@ -165,6 +204,45 @@ public sealed class Message
 
 [Index("idx_reply_message_created", $"{nameof(MessageId)}, {nameof(CreatedAt)}", false)]
 public sealed class MessageReply
+{
+    [Column(Name = nameof(Id), IsPrimary = true, IsIdentity = true)]
+    public long Id { get; set; }
+
+    [Column(Name = nameof(MessageId), IsNullable = false)]
+    public long MessageId { get; set; }
+
+    [Column(Name = nameof(UserId), IsNullable = false)]
+    public long UserId { get; set; }
+
+    [Column(Name = nameof(Content), StringLength = 1000, IsNullable = false)]
+    public string Content { get; set; } = string.Empty;
+
+    [Column(Name = nameof(CreatedAt), IsNullable = false)]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+// ───── 系统留言（不绑定学校） ─────
+
+[Table(Name = "site_messages")]
+[Index("idx_site_message_created", nameof(CreatedAt), false)]
+public sealed class SiteMessage
+{
+    [Column(Name = nameof(Id), IsPrimary = true, IsIdentity = true)]
+    public long Id { get; set; }
+
+    [Column(Name = nameof(UserId), IsNullable = false)]
+    public long UserId { get; set; }
+
+    [Column(Name = nameof(Content), StringLength = 1000, IsNullable = false)]
+    public string Content { get; set; } = string.Empty;
+
+    [Column(Name = nameof(CreatedAt), IsNullable = false)]
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
+[Table(Name = "site_message_replies")]
+[Index("idx_site_reply_message_created", $"{nameof(MessageId)}, {nameof(CreatedAt)}", false)]
+public sealed class SiteMessageReply
 {
     [Column(Name = nameof(Id), IsPrimary = true, IsIdentity = true)]
     public long Id { get; set; }

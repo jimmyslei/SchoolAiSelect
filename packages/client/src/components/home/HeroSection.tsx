@@ -154,7 +154,7 @@ export function HeroSection({
           <div className="relative overflow-hidden rounded-[36px] border border-border/40 bg-gradient-to-br from-background/95 via-warm-50/30 to-peach-50/20 p-5 shadow-lg backdrop-blur-sm sm:p-6">
             {/* Grid pattern overlay */}
             <div className="warm-grid pointer-events-none absolute inset-0 opacity-60" />
-            <div className="absolute right-5 top-5 rounded-full border border-warm-200/50 bg-background/80 px-3 py-1 text-xs font-medium text-warm-700 backdrop-blur-sm">
+            <div className="absolute right-5 top-5 rounded-full border z-1 border-warm-200/50 bg-background/80 px-3 py-1 text-xs font-medium text-warm-700 backdrop-blur-sm">
               实时生成推荐结果
             </div>
 

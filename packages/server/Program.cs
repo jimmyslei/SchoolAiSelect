@@ -15,6 +15,7 @@ using SchoolRecommender.Api.Models;
 using SchoolRecommender.Api.Options;
 using SchoolRecommender.Api.Services;
 using SchoolRecommender.Api.Utils;
+using StackExchange.Redis;
 
 EnvFileLoader.Load(Path.Combine(Directory.GetCurrentDirectory(), ".env"));
 
@@ -76,8 +77,11 @@ builder.Services.AddSingleton<IFreeSql>(_ =>
     freeSql.CodeFirst.SyncStructure<EmailVerificationCode>();
     freeSql.CodeFirst.SyncStructure<Message>();
     freeSql.CodeFirst.SyncStructure<MessageReply>();
+    freeSql.CodeFirst.SyncStructure<SiteMessage>();
+    freeSql.CodeFirst.SyncStructure<SiteMessageReply>();
     freeSql.CodeFirst.SyncStructure<SchoolAnalysisLog>();
     freeSql.CodeFirst.SyncStructure<SiteVisitStat>();
+    freeSql.CodeFirst.SyncStructure<AnalysisHistory>();
     return freeSql;
 });
 
@@ -120,9 +124,11 @@ builder.Services.AddSingleton<UniversityAnalysisOrchestrator>();
 builder.Services.AddSingleton<UniversityRankingService>();
 builder.Services.AddSingleton<HighSchoolRecommendAgent>();
 builder.Services.AddSingleton<HighSchoolRankingService>();
+builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(options.RedisConnectionString));
 builder.Services.AddSingleton<AuthService>();
 builder.Services.AddSingleton<MessageService>();
 builder.Services.AddSingleton<AnalyticsService>();
+builder.Services.AddSingleton<HistoryService>();
 
 var app = builder.Build();
 
@@ -229,9 +235,9 @@ authGroup.MapPost("/login",
     .WithSummary("使用邮箱登录");
 
 authGroup.MapGet("/me",
-    Results<Ok<ApiResponse<SessionUser>>, UnauthorizedHttpResult> (HttpContext httpContext, AuthService authService) =>
+    async Task<Results<Ok<ApiResponse<SessionUser>>, UnauthorizedHttpResult>> (HttpContext httpContext, AuthService authService) =>
     {
-        var user = authService.GetUserFromRequest(httpContext);
+        var user = await authService.GetUserFromRequestAsync(httpContext);
         return user is null
             ? TypedResults.Unauthorized()
             : TypedResults.Ok(ApiResponse<SessionUser>.Ok(user));
@@ -263,7 +269,7 @@ messageGroup.MapPost("/",
         MessageService messageService,
         CancellationToken cancellationToken) =>
     {
-        var user = authService.GetUserFromRequest(httpContext);
+        var user = await authService.GetUserFromRequestAsync(httpContext);
         if (user is null)
         {
             return TypedResults.Unauthorized();
@@ -291,7 +297,7 @@ messageGroup.MapPost("/{messageId:long}/replies",
         MessageService messageService,
         CancellationToken cancellationToken) =>
     {
-        var user = authService.GetUserFromRequest(httpContext);
+        var user = await authService.GetUserFromRequestAsync(httpContext);
         if (user is null)
         {
             return TypedResults.Unauthorized();
@@ -311,6 +317,83 @@ messageGroup.MapPost("/{messageId:long}/replies",
     })
     .WithName("CreateMessageReply")
     .WithSummary("回复留言");
+
+var siteMessageGroup = app.MapGroup("/api/site-messages")
+    .WithTags("SiteMessages")
+    .RequireRateLimiting("api");
+
+siteMessageGroup.MapGet("/",
+    async Task<Ok<ApiResponse<IReadOnlyList<SiteMessageThread>>>> (
+        MessageService messageService,
+        CancellationToken cancellationToken) =>
+    {
+        var messages = await messageService.GetSiteMessagesAsync(cancellationToken);
+        return TypedResults.Ok(ApiResponse<IReadOnlyList<SiteMessageThread>>.Ok(messages));
+    })
+    .WithName("ListSiteMessages")
+    .WithSummary("获取系统留言列表（所有人可见）");
+
+siteMessageGroup.MapPost("/",
+    async Task<Results<Ok<ApiResponse<SiteMessageThread>>, BadRequest<ApiResponse<object>>, UnauthorizedHttpResult>> (
+        HttpContext httpContext,
+        [FromBody] CreateSiteMessageRequest request,
+        AuthService authService,
+        MessageService messageService,
+        CancellationToken cancellationToken) =>
+    {
+        var user = await authService.GetUserFromRequestAsync(httpContext);
+        if (user is null)
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        try
+        {
+            var message = await messageService.CreateSiteMessageAsync(user, request, cancellationToken);
+            return TypedResults.Ok(ApiResponse<SiteMessageThread>.Ok(message, "留言已发布"));
+        }
+        catch (ArgumentException exception)
+        {
+            return TypedResults.BadRequest(ApiResponse<object>.Fail(exception.Message));
+        }
+    })
+    .WithName("CreateSiteMessage")
+    .WithSummary("发布系统留言（登录用户）");
+
+siteMessageGroup.MapPost("/{messageId:long}/replies",
+    async Task<Results<Ok<ApiResponse<SiteMessageReplyDto>>, BadRequest<ApiResponse<object>>, NotFound<ApiResponse<object>>, UnauthorizedHttpResult, ForbidHttpResult>> (
+        HttpContext httpContext,
+        long messageId,
+        [FromBody] CreateReplyRequest request,
+        AuthService authService,
+        MessageService messageService,
+        CancellationToken cancellationToken) =>
+    {
+        var user = await authService.GetUserFromRequestAsync(httpContext);
+        if (user is null)
+        {
+            return TypedResults.Unauthorized();
+        }
+
+        if (!user.IsAdmin)
+        {
+            return TypedResults.Forbid();
+        }
+
+        try
+        {
+            var reply = await messageService.CreateSiteMessageReplyAsync(user, messageId, request, cancellationToken);
+            return reply is null
+                ? TypedResults.NotFound(ApiResponse<object>.Fail("留言不存在"))
+                : TypedResults.Ok(ApiResponse<SiteMessageReplyDto>.Ok(reply, "回复已发布"));
+        }
+        catch (ArgumentException exception)
+        {
+            return TypedResults.BadRequest(ApiResponse<object>.Fail(exception.Message));
+        }
+    })
+    .WithName("CreateSiteMessageReply")
+    .WithSummary("管理员回复系统留言");
 
 var locationGroup = app.MapGroup("/api/location")
     .WithTags("Location")
@@ -384,10 +467,12 @@ schoolGroup.MapPost("/search",
         SchoolAnalysisOrchestrator orchestrator,
         SchoolRankingService rankingService,
         AnalyticsService analyticsService,
+        HistoryService historyService,
         AuthService authService,
         CancellationToken cancellationToken) =>
     {
-        if (authService.GetUserFromRequest(httpContext) is null)
+        var user = await authService.GetUserFromRequestAsync(httpContext);
+        if (user is null)
         {
             await WriteJsonErrorAsync(httpContext, StatusCodes.Status401Unauthorized, "请先登录后再开始分析", cancellationToken);
             return;
@@ -491,10 +576,32 @@ schoolGroup.MapPost("/search",
                 clientIp,
                 userAgent,
                 cancellationToken);
-            await WriteEventAsync("done", new
+
+            var donePayload = new
             {
+                schoolType = request.SchoolType,
+                locationAddress = location.Address,
                 rankings,
-            });
+                analyzedCount = rankings.Count,
+                totalCount = rankings.Count,
+            };
+            await WriteEventAsync("done", donePayload);
+
+            // 保存历史记录
+            try
+            {
+                var schoolTypeLabel = SchoolTypes.DisplayName(request.SchoolType);
+                var title = $"{location.Address}·{schoolTypeLabel}";
+                var summary = $"共分析 {rankings.Count} 所学校";
+                var requestJson = JsonSerializer.Serialize(request, jsonOptions);
+                var resultJson = JsonSerializer.Serialize(donePayload, jsonOptions);
+                await historyService.SaveAsync(user.Id, "school", title, requestJson, resultJson, summary, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                // 历史保存失败不影响主流程
+                app.Logger.LogWarning(ex, "保存学校搜索历史失败, userId={UserId}", user.Id);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -596,9 +703,11 @@ universityGroup.MapPost("/search",
         UniversityAnalysisOrchestrator orchestrator,
         UniversityRankingService rankingService,
         AuthService authService,
+        HistoryService historyService,
         CancellationToken cancellationToken) =>
     {
-        if (authService.GetUserFromRequest(httpContext) is null)
+        var user = await authService.GetUserFromRequestAsync(httpContext);
+        if (user is null)
         {
             await WriteJsonErrorAsync(httpContext, StatusCodes.Status401Unauthorized, "请先登录后再开始分析", cancellationToken);
             return;
@@ -669,10 +778,30 @@ universityGroup.MapPost("/search",
             }
 
             var rankings = rankingService.RankUniversities(analyses, request.StudentScore);
-            await WriteEventAsync("done", new
+            var donePayloadUni = new
             {
+                studentScore = request.StudentScore,
+                universityNames = request.UniversityNames,
                 rankings,
-            });
+                analyzedCount = rankings.Count,
+                totalCount = request.UniversityNames.Count,
+            };
+            await WriteEventAsync("done", donePayloadUni);
+
+            // 保存历史记录
+            try
+            {
+                var uniNames = string.Join("、", request.UniversityNames.Take(3));
+                var title = $"{request.StudentScore}分·{uniNames}{(request.UniversityNames.Count > 3 ? "等" : "")}";
+                var summary = $"共分析 {rankings.Count} 所大学";
+                var requestJson = JsonSerializer.Serialize(request, jsonOptions);
+                var resultJson = JsonSerializer.Serialize(donePayloadUni, jsonOptions);
+                await historyService.SaveAsync(user.Id, "university", title, requestJson, resultJson, summary, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogWarning(ex, "保存大学搜索历史失败, userId={UserId}", user.Id);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -705,9 +834,11 @@ highSchoolGroup.MapPost("/recommend",
         HighSchoolRecommendAgent agent,
         HighSchoolRankingService rankingService,
         AuthService authService,
+        HistoryService historyService,
         CancellationToken cancellationToken) =>
     {
-        if (authService.GetUserFromRequest(httpContext) is null)
+        var user = await authService.GetUserFromRequestAsync(httpContext);
+        if (user is null)
         {
             await WriteJsonErrorAsync(httpContext, StatusCodes.Status401Unauthorized, "请先登录后再开始分析", cancellationToken);
             return;
@@ -772,11 +903,27 @@ highSchoolGroup.MapPost("/recommend",
             }
 
             var normalized = rankingService.Normalize(recommendations, request.StudentScore);
-
-            await WriteEventAsync("done", new
+            var donePayloadHs = new
             {
+                studentScore = request.StudentScore,
+                province = request.Province,
                 recommendations = normalized,
-            });
+            };
+            await WriteEventAsync("done", donePayloadHs);
+
+            // 保存历史记录
+            try
+            {
+                var title = $"{request.Province}·高中择校·{request.StudentScore}分";
+                var summary = $"共推荐 {normalized.Count} 所高中";
+                var requestJson = JsonSerializer.Serialize(request, jsonOptions);
+                var resultJson = JsonSerializer.Serialize(donePayloadHs, jsonOptions);
+                await historyService.SaveAsync(user.Id, "highschool", title, requestJson, resultJson, summary, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                app.Logger.LogWarning(ex, "保存高中推荐历史失败, userId={UserId}", user.Id);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -793,6 +940,98 @@ highSchoolGroup.MapPost("/recommend",
     })
     .WithName("RecommendHighSchools")
     .WithSummary("根据学生分数和所在省份，按冲/稳/保三档推荐适合报考的高中");
+
+// ═══════════════════════════════════════════════════════════
+// 历史分析记录 API
+// ═══════════════════════════════════════════════════════════
+
+var historyGroup = app.MapGroup("/api/history")
+    .WithTags("History")
+    .RequireRateLimiting("api");
+
+historyGroup.MapGet("",
+    async (
+        HttpContext httpContext,
+        HistoryService historyService,
+        AuthService authService,
+        int page = 1,
+        int pageSize = 20,
+        CancellationToken cancellationToken = default) =>
+    {
+        if (await authService.GetUserFromRequestAsync(httpContext) is not { } user)
+        {
+            return Results.Json(ApiResponse<object>.Fail("请先登录"), statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        var items = await historyService.ListAsync(user.Id, page, pageSize, cancellationToken);
+        var total = await historyService.CountAsync(user.Id, cancellationToken);
+        return Results.Ok(ApiResponse<object>.Ok(new { items, total, page, pageSize }));
+    })
+    .WithName("GetAnalysisHistory")
+    .WithSummary("获取当前用户的历史分析记录列表");
+
+historyGroup.MapGet("/{id:long}",
+    async (
+        HttpContext httpContext,
+        long id,
+        HistoryService historyService,
+        AuthService authService,
+        CancellationToken cancellationToken) =>
+    {
+        if (await authService.GetUserFromRequestAsync(httpContext) is not { } user)
+        {
+            return Results.Json(ApiResponse<object>.Fail("请先登录"), statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        var detail = await historyService.GetDetailAsync(id, user.Id, cancellationToken);
+        if (detail is null)
+        {
+            return Results.Json(ApiResponse<object>.Fail("记录不存在"), statusCode: StatusCodes.Status404NotFound);
+        }
+
+        return Results.Ok(ApiResponse<AnalysisHistoryDetail>.Ok(detail));
+    })
+    .WithName("GetAnalysisHistoryDetail")
+    .WithSummary("获取单条历史分析记录详情（含完整结果）");
+
+historyGroup.MapDelete("/{id:long}",
+    async (
+        HttpContext httpContext,
+        long id,
+        HistoryService historyService,
+        AuthService authService,
+        CancellationToken cancellationToken) =>
+    {
+        if (await authService.GetUserFromRequestAsync(httpContext) is not { } user)
+        {
+            return Results.Json(ApiResponse<object>.Fail("请先登录"), statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        var deleted = await historyService.DeleteAsync(id, user.Id, cancellationToken);
+        return deleted
+            ? Results.Ok(ApiResponse<object>.Ok(new { }))
+            : Results.Json(ApiResponse<object>.Fail("记录不存在"), statusCode: StatusCodes.Status404NotFound);
+    })
+    .WithName("DeleteAnalysisHistory")
+    .WithSummary("删除单条历史分析记录");
+
+historyGroup.MapDelete("",
+    async (
+        HttpContext httpContext,
+        HistoryService historyService,
+        AuthService authService,
+        CancellationToken cancellationToken) =>
+    {
+        if (await authService.GetUserFromRequestAsync(httpContext) is not { } user)
+        {
+            return Results.Json(ApiResponse<object>.Fail("请先登录"), statusCode: StatusCodes.Status401Unauthorized);
+        }
+
+        await historyService.DeleteAllAsync(user.Id, cancellationToken);
+        return Results.Ok(ApiResponse<object>.Ok(new { }));
+    })
+    .WithName("DeleteAllAnalysisHistory")
+    .WithSummary("清空当前用户所有历史分析记录");
 
 try
 {

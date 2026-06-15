@@ -188,7 +188,7 @@ admissionCutoffScores 输出格式（JSON 字符串）：
 - search_school_info（评价）：school_name="{{school.Name}}", aspect="评价", region="{{school.CityName}}{{school.AdName}}"
 - search_school_info（师资）：school_name="{{school.Name}}", aspect="师资", region="{{school.CityName}}{{school.AdName}}"
 {{seniorHighSection}}
-提示：search_wechat_articles 与 search_school_info 可并行调用以节省时间；两次 search_school_info 需顺序执行（aspect 不同）。
+提示：三个工具调用（search_wechat_articles、search_school_info aspect=评价、search_school_info aspect=师资）必须全部并行同时发出，不得串行等待。
 
 只返回如下格式的严格 JSON（不含 Markdown 代码块，不含解释文字）：
 {
@@ -258,11 +258,11 @@ admissionCutoffScores 输出格式（JSON 字符串）：
 
         【强制调研流程】
         以下步骤全部必须执行，某步返回"未检索到相关结果"时也必须继续：
-        步骤 1：调用 search_wechat_articles（获取微信公众号内容）
-        步骤 2：调用 search_school_info，aspect="评价"（获取家长口碑）
-        步骤 3：调用 search_school_info，aspect="师资"（获取师资信息）
-        步骤 4：汇总全部结果，综合分析后输出 JSON
-        注意：步骤 1 与步骤 2/3 可并行执行；步骤 2 与步骤 3 需依次执行。
+        步骤 1+2+3 并行：同时调用以下三个工具（全部并行发出，不要等待其中任何一个完成后再发下一个）：
+          - search_wechat_articles（获取微信公众号内容）
+          - search_school_info，aspect="评价"（获取家长口碑）
+          - search_school_info，aspect="师资"（获取师资信息）
+        步骤 4：等待以上三个工具全部返回后，汇总全部结果，综合分析后输出 JSON
 
         【高中专项】
         当用户提示中包含"高中专项：录取分数线调研"时，你必须额外执行：

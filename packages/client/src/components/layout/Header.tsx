@@ -1,6 +1,7 @@
-import { useState } from "react";
-import { GraduationCap, Menu, Sparkles, X } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Clock, GraduationCap, Menu, Sparkles, X } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useNavigate } from "react-router-dom";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { ThemeToggle } from "@/components/shared/ThemeToggle";
@@ -14,10 +15,20 @@ interface HeaderProps {
 }
 
 const navItems = [
+  { href: "/history", label: "历史记录", icon: true },
   { href: "#features", label: "能力亮点" },
   { href: "#workflow", label: "使用流程" },
   { href: "#about", label: "数据说明" },
 ];
+
+/** 平滑滚动到页面内锚点 */
+function scrollToAnchor(hash: string) {
+  const id = hash.replace("#", "");
+  const el = document.getElementById(id);
+  if (el) {
+    el.scrollIntoView({ behavior: "smooth" });
+  }
+}
 
 export function Header({
   className,
@@ -26,6 +37,37 @@ export function Header({
   onLogout,
 }: HeaderProps) {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const navigate = useNavigate();
+
+  const handleNavClick = useCallback(
+    (href: string) => {
+      if (href.startsWith("#")) {
+        // 首页锚点：确保在首页后滚动到目标
+        if (window.location.pathname !== "/") {
+          navigate("/" + href);
+          // 路由切换后等 DOM 更新再滚动
+          setTimeout(() => scrollToAnchor(href), 100);
+        } else {
+          scrollToAnchor(href);
+        }
+      } else {
+        // 路由链接（如 /history）
+        navigate(href);
+      }
+      setMobileMenuOpen(false);
+    },
+    [navigate],
+  );
+
+  const handleHeroStartClick = useCallback(() => {
+    if (window.location.pathname !== "/") {
+      navigate("/#hero-start");
+      setTimeout(() => scrollToAnchor("#hero-start"), 100);
+    } else {
+      scrollToAnchor("#hero-start");
+    }
+    setMobileMenuOpen(false);
+  }, [navigate]);
 
   return (
     <>
@@ -36,7 +78,11 @@ export function Header({
         )}
       >
         <div className="surface-panel mx-auto flex h-16 w-full max-w-6xl items-center justify-between rounded-full px-4 sm:px-6">
-          <a href="#top" className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => handleNavClick("#top")}
+            className="flex items-center gap-3"
+          >
             <div className="flex h-11 w-11 items-center justify-center rounded-full bg-linear-to-br from-warm-500 to-peach-400 text-white shadow-[0_12px_24px_rgba(224,122,63,0.28)]">
               <GraduationCap className="h-5 w-5" />
             </div>
@@ -48,17 +94,19 @@ export function Header({
                 学校推荐系统
               </h1>
             </div>
-          </a>
+          </button>
 
           <nav className="hidden items-center gap-0.5 md:flex">
             {navItems.map((item) => (
-              <a
+              <button
                 key={item.href}
-                href={item.href}
-                className="relative rounded-full px-4 py-2 text-sm text-neutral-600 transition-all duration-200 hover:bg-warm-50 hover:text-warm-700"
+                type="button"
+                onClick={() => handleNavClick(item.href)}
+                className="relative inline-flex items-center gap-1.5 rounded-full px-4 py-2 text-sm text-neutral-600 transition-all duration-200 hover:bg-warm-50 hover:text-warm-700"
               >
+                {item.icon && <Clock className="h-3.5 w-3.5" />}
                 {item.label}
-              </a>
+              </button>
             ))}
           </nav>
 
@@ -89,8 +137,8 @@ export function Header({
               <Sparkles className="h-3.5 w-3.5" />
               AI 多源分析
             </div>
-            <Button asChild variant="warm" size="sm">
-              <a href="#hero-start">开始择校</a>
+            <Button variant="warm" size="sm" onClick={handleHeroStartClick}>
+              开始择校
             </Button>
           </div>
 
@@ -121,14 +169,15 @@ export function Header({
             <div className="surface-panel rounded-[28px] p-4">
               <nav className="flex flex-col gap-1">
                 {navItems.map((item) => (
-                  <a
+                  <button
                     key={item.href}
-                    href={item.href}
-                    onClick={() => setMobileMenuOpen(false)}
-                    className="rounded-2xl px-4 py-3 text-sm text-neutral-700 transition-colors hover:bg-accent hover:text-warm-700"
+                    type="button"
+                    onClick={() => handleNavClick(item.href)}
+                    className="inline-flex items-center gap-2 rounded-2xl px-4 py-3 text-sm text-neutral-700 transition-colors hover:bg-accent hover:text-warm-700"
                   >
+                    {item.icon && <Clock className="h-4 w-4" />}
                     {item.label}
-                  </a>
+                  </button>
                 ))}
                 <div className="flex items-center justify-center py-2">
                   <ThemeToggle />
@@ -157,13 +206,12 @@ export function Header({
                     登录 / 注册
                   </Button>
                 )}
-                <Button asChild variant="warm" className="mt-1 w-full">
-                  <a
-                    href="#hero-start"
-                    onClick={() => setMobileMenuOpen(false)}
-                  >
-                    开始择校
-                  </a>
+                <Button
+                  variant="warm"
+                  className="mt-1 w-full"
+                  onClick={handleHeroStartClick}
+                >
+                  开始择校
                 </Button>
               </nav>
             </div>

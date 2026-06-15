@@ -1,9 +1,9 @@
 ---
 name: general-web-search
-description: 通用联网搜索技能（轻量 HTTP 版）。参数为必填的搜索关键词，先用搜狗 PC 端 https://www.sogou.com/web 抓取通用网页搜索结果；当遇到反爬验证码、网络异常或结果为空时，自动 fallback 到 Bing 国内版 https://cn.bing.com/search 兜底获取数据。返回标题、概要、来源站点与链接，结果以 JSON 格式输出。基于 Node.js + cheerio，无需浏览器依赖。当用户提到"联网搜索"、"网页搜索"、"查一下某个关键词"、"搜索某条新闻/学校/公司/人物的公开信息"时使用此技能。
+description: 通用联网搜索技能（轻量 HTTP 版）。参数为必填的搜索关键词，先用搜狗 PC 端 https://www.sogou.com/web 抓取通用网页搜索结果；当遇到反爬验证码、网络异常或结果为空时，自动 fallback 到 Bing 国内版 https://cn.bing.com/search，再兜底到 360 搜索 https://www.so.com/s，尽量保证每次都有结果返回。返回标题、概要、来源站点与链接，结果以 JSON 格式输出。基于 Node.js + cheerio，无需浏览器依赖。当用户提到"联网搜索"、"网页搜索"、"查一下某个关键词"、"搜索某条新闻/学校/公司/人物的公开信息"时使用此技能。
 ---
 
-# 通用联网搜索（搜狗 + Bing 双通道，HTTP 版）
+# 通用联网搜索（搜狗 + Bing + 360，多通道兜底，HTTP 版）
 
 ## 适用场景
 
@@ -15,17 +15,19 @@ description: 通用联网搜索技能（轻量 HTTP 版）。参数为必填的�
 
 ## 双通道策略
 
-| 阶段 | 引擎        | 端点                 | 说明                                                              |
-| ---- | ----------- | -------------------- | ----------------------------------------------------------------- |
-| 主路 | 搜狗 PC 端  | `www.sogou.com/web`  | UA 池随机轮换，附带 Sogou cookie，反爬触发时立即降级              |
-| 兜底 | Bing 国内版 | `cn.bing.com/search` | 搜狗触发验证码 / 拿不到结果 / 数量不足时自动启用                  |
-| 合并 | —           | —                    | 两路结果按 URL 去重合并，每条带 `engine` 字段（`sogou` / `bing`） |
+| 阶段 | 引擎        | 端点                 | 说明                                                                             |
+| ---- | ----------- | -------------------- | -------------------------------------------------------------------------------- |
+| 主路 | 搜狗 PC 端  | `www.sogou.com/web`  | UA 池随机轮换，附带 Sogou cookie，反爬触发时立即降级                             |
+| 次路 | Bing 国内版 | `cn.bing.com/search` | 搜狗触发验证码 / 拿不到结果 / 数量不足时自动启用                                 |
+| 末路 | 360 搜索    | `www.so.com/s`       | 搜狗+Bing 过滤后仍为空或不足时继续兜底，补足通用中文结果                         |
+| 合并 | —           | —                    | 多路结果按 URL/标题 去重合并，每条带 `engine` 字段（`sogou` / `bing` / `so360`） |
 
 兜底触发条件（`engine=auto` 时）：
 
 - 搜狗返回 antispider/captcha 页（HTML 命中"验证码""请输入下方校验码""为了您的网络安全"等关键词）
 - 搜狗 HTTP 状态非 2xx
 - 搜狗有效结果数 < `min(num, 3)`
+- 搜狗+Bing 相关性过滤后总结果仍 < `min(num, 3)` 时继续触发 360 兜底
 
 ## 工作流程
 
@@ -72,7 +74,8 @@ node scripts/search_web.js "关键词" -n 20 -o result.json
 ```bash
 node scripts/search_web.js "关键词" --engine sogou   # 仅搜狗
 node scripts/search_web.js "关键词" --engine bing    # 仅 Bing
-node scripts/search_web.js "关键词" --engine auto    # 默认：搜狗+Bing 兜底
+node scripts/search_web.js "关键词" --engine so360   # 仅 360
+node scripts/search_web.js "关键词" --engine auto    # 默认：搜狗→Bing→360 兜底
 ```
 
 4. 解析搜狗 `/link?url=...` 跳转链接为真实地址（仅搜狗结果生效）
@@ -87,16 +90,17 @@ node scripts/search_web.js "关键词" -n 5 -r
 - `-n, --num`：返回数量（默认 10，最大 30）
 - `-o, --output`：输出 JSON 文件路径（可选）
 - `-r, --resolve-url`：把搜狗 `/link?url=...` 跳转链接解析为真实 URL（每条结果会额外发起请求）
-- `--engine`：搜索引擎选择，`auto`（默认） / `sogou` / `bing`
+- `--engine`：搜索引擎选择，`auto`（默认） / `sogou` / `bing` / `so360`
 
 ## 输出结构
 
 ```json
 {
   "query": "关键词",
-  "engine_used": "sogou+bing",
+  "engine_used": "sogou+bing+so360",
   "sogou_status": "ok",
   "bing_status": "skipped",
+  "so360_status": "skipped",
   "total": 10,
   "results": [
     {
@@ -112,25 +116,27 @@ node scripts/search_web.js "关键词" -n 5 -r
 
 字段说明：
 
-- `engine_used`：实际使用的引擎，可能值 `sogou` / `bing` / `sogou+bing` / `none`
-- `sogou_status` / `bing_status`：每路引擎的状态，`ok` / `captcha` / `empty` / `error` / `skipped`
+- `engine_used`：实际使用的引擎，可能值 `sogou` / `bing` / `so360` / `sogou+bing` / `sogou+bing+so360` / `none`
+- `sogou_status` / `bing_status` / `so360_status`：每路引擎的状态，`ok` / `captcha` / `empty` / `error` / `skipped`
 - `results[].engine`：该条结果来自哪一路引擎
 - `results[].url_resolved`：仅 `-r` 模式且为搜狗结果时出现
 
 ## 反爬保护设计
 
-| 机制              | 说明                                                     |
-| ----------------- | -------------------------------------------------------- |
-| UA 池轮换         | 内置 20 个真实浏览器 UA，每次请求随机挑选                |
-| Sogou cookie 预热 | 先访问 sogou 首页拿到 SUV/SUID 等 cookie，再带到搜索请求 |
-| 自动降级 Bing     | 检测到 antispider/验证码关键词或空结果立即切到 Bing      |
-| 翻页节流          | 翻页之间随机 500-1500ms 间隔，模拟人类节奏               |
-| URL 去重          | 主路 + 兜底合并时按结果 URL 去重，保留主路优先           |
+| 机制              | 说明                                                       |
+| ----------------- | ---------------------------------------------------------- |
+| UA 池轮换         | 内置 20 个真实浏览器 UA，每次请求随机挑选                  |
+| Sogou cookie 预热 | 先访问 sogou 首页拿到 SUV/SUID 等 cookie，再带到搜索请求   |
+| 自动降级 Bing/360 | 检测到 antispider/验证码、空结果或强相关结果不足时自动切换 |
+| 翻页节流          | 翻页之间随机 500-1500ms 间隔，模拟人类节奏                 |
+| URL/标题去重      | 多路合并时按 URL 与标题去重，保留主路优先                  |
+| 相关性过滤        | 对每一路结果按 query token/LCS 过滤，减少无关网页污染      |
 
 ## 常见问题处理
 
-- **两路都拿不到结果**：稍后重试，或换更精准的关键词
+- **多路都拿不到结果**：稍后重试，或换更精准的关键词
 - **搜狗持续返回验证码**：用 `--engine bing` 跳过搜狗
+- **Bing 结果偏空**：可用 `--engine so360` 单独测试 360 中文结果
 - **解析真实 URL 失败**：搜狗 `/link` 跳转有限频，仅在最终需要时才用 `-r`
 - **结果偏少**：增大 `-n` 数值，脚本会自动翻页（每页 10 条）
 
