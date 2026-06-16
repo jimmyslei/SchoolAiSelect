@@ -37,13 +37,17 @@ public sealed class SchoolAnalysisAgent
         // DashScopeResponseFixerHandler：在 OpenAI SDK 反序列化前，修正 DashScope 把
         // tool_call arguments 序列化为数组而非对象的格式问题。
         var fixerHandler = new DashScopeResponseFixerHandler();
-        var httpClient = new HttpClient(fixerHandler);
+        var httpClient = new HttpClient(fixerHandler)
+        {
+            Timeout = options.DashScopeNetworkTimeout + TimeSpan.FromSeconds(10),
+        };
 
         var openAiClient = new OpenAIClient(
             new ApiKeyCredential(options.DashScopeApiKey),
             new OpenAIClientOptions
             {
                 Endpoint = new Uri(options.DashScopeBaseUrl, UriKind.Absolute),
+                NetworkTimeout = options.DashScopeNetworkTimeout,
                 Transport = new HttpClientPipelineTransport(httpClient),
             });
 

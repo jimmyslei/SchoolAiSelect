@@ -39,7 +39,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble"
+                  "$ref": "#/components/schemas/AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble"
                 }
               }
             }
@@ -831,7 +831,7 @@
   },
   "components": {
     "schemas": {
-      "AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble": {
+      "AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble": {
         "required": [
           "status",
           "timestamp",
@@ -851,16 +851,17 @@
             "format": "date-time"
           },
           "configuration": {
-            "$ref": "#/components/schemas/AnonymousTypeOfstringAndintAndintAndintAndstringAndboolean"
+            "$ref": "#/components/schemas/AnonymousTypeOfstringAndintAndintAndintAndintAndstringAndboolean"
           },
           "environment": {
             "$ref": "#/components/schemas/AnonymousTypeOfstringAndstringAndintAnddouble"
           }
         }
       },
-      "AnonymousTypeOfstringAndintAndintAndintAndstringAndboolean": {
+      "AnonymousTypeOfstringAndintAndintAndintAndintAndstringAndboolean": {
         "required": [
           "model",
+          "dashScopeNetworkTimeoutSeconds",
           "maxConcurrency",
           "amapPageSize",
           "skillTimeoutSeconds",
@@ -874,6 +875,14 @@
               "null",
               "string"
             ]
+          },
+          "dashScopeNetworkTimeoutSeconds": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
           },
           "maxConcurrency": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",

@@ -170,6 +170,7 @@ app.MapGet("/api/health", (SchoolServiceOptions svcOptions) =>
             configuration = new
             {
                 model = svcOptions.DashScopeModel,
+                dashScopeNetworkTimeoutSeconds = (int)svcOptions.DashScopeNetworkTimeout.TotalSeconds,
                 maxConcurrency = svcOptions.AnalysisMaxConcurrency,
                 amapPageSize = svcOptions.AmapPageSize,
                 skillTimeoutSeconds = (int)svcOptions.SkillTimeout.TotalSeconds,

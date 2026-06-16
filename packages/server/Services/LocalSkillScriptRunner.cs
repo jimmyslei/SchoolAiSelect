@@ -10,6 +10,19 @@ using SchoolRecommender.Api.Options;
 
 namespace SchoolRecommender.Api.Services;
 
+public sealed record AnySearchBatchQuery
+{
+    public string Query { get; init; } = string.Empty;
+
+    public int? MaxResults { get; init; }
+
+    public string? Domain { get; init; }
+
+    public string? SubDomain { get; init; }
+
+    public string? SubDomainParams { get; init; }
+}
+
 public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger<LocalSkillScriptRunner> logger)
 {
     private readonly string skillDebugLogPath = Path.Combine(
@@ -332,14 +345,18 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
 
         try
         {
+            var requestTimeout = TimeSpan.FromSeconds(Math.Clamp((int)Math.Ceiling(options.SkillTimeout.TotalSeconds), 5, 20));
+
             using var handler = new HttpClientHandler
             {
                 AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate | DecompressionMethods.Brotli,
             };
             using var httpClient = new HttpClient(handler)
             {
-                Timeout = TimeSpan.FromSeconds(Math.Max(10, options.SkillTimeout.TotalSeconds)),
+                Timeout = Timeout.InfiniteTimeSpan,
             };
+            using var requestTimeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            requestTimeoutCts.CancelAfter(requestTimeout);
 
             httpClient.DefaultRequestHeaders.TryAddWithoutValidation("User-Agent",
                 "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36");
@@ -350,19 +367,17 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
             logger.LogInformation("Explicit tool invoked. Tool: fetch_webpage_content, Url: {Url}", url);
             WriteSkillDebugLog("EXPLICIT_TOOL_INVOKED", $"Tool=fetch_webpage_content; Url={url}");
 
-            using var response = await httpClient.GetAsync(uri, cancellationToken).ConfigureAwait(false);
+            using var response = await httpClient.GetAsync(uri, requestTimeoutCts.Token).ConfigureAwait(false);
             var mediaType = response.Content.Headers.ContentType?.MediaType;
-            var rawContent = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            var rawContent = await response.Content.ReadAsStringAsync(requestTimeoutCts.Token).ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
             {
-                return JsonSerializer.Serialize(new
-                {
+                logger.LogInformation(
+                    "Fetch webpage content skipped due to non-success status. Url: {Url}, Status: {StatusCode}",
                     url,
-                    status = (int)response.StatusCode,
-                    error = $"HTTP {(int)response.StatusCode}",
-                    content = TruncateFetchedContent(rawContent),
-                }, FilteredResultJsonOptions);
+                    (int)response.StatusCode);
+                return BuildSkippedFetchResult(url, $"HTTP {(int)response.StatusCode}");
             }
 
             var extracted = ExtractReadableContent(rawContent, mediaType);
@@ -380,15 +395,277 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         {
             throw;
         }
+        catch (OperationCanceledException)
+        {
+            logger.LogInformation("Fetch webpage content timed out and was skipped: {Url}", url);
+            return BuildSkippedFetchResult(url, "timeout");
+        }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Fetch webpage content failed: {Url}", url);
-            return JsonSerializer.Serialize(new
-            {
-                url,
-                error = ex.Message,
-            }, FilteredResultJsonOptions);
+            logger.LogWarning(ex, "Fetch webpage content failed and was skipped: {Url}", url);
+            return BuildSkippedFetchResult(url, ex.Message);
         }
+    }
+
+    private static string BuildSkippedFetchResult(string url, string reason)
+    {
+        return JsonSerializer.Serialize(new
+        {
+            url,
+            skipped = true,
+            reason,
+            title = string.Empty,
+            content = string.Empty,
+            contentLength = 0,
+            admissionScoreHints = Array.Empty<object>(),
+        }, FilteredResultJsonOptions);
+    }
+
+    /// <summary>
+    /// 使用 AnySearch 搜索引擎进行联网搜索，支持通用搜索和垂直领域搜索。
+    /// </summary>
+    public async Task<string> SearchAnyAsync(
+        string query,
+        int? maxResults,
+        string? domain,
+        string? subDomain,
+        string? subDomainParams,
+        CancellationToken cancellationToken)
+    {
+        // 过滤 LLM 传递的 "None" 字符串
+        domain = FilterNone(domain);
+        subDomain = FilterNone(subDomain);
+        subDomainParams = FilterNone(subDomainParams);
+
+        if (string.IsNullOrWhiteSpace(query))
+        {
+            return "Error: query 不能为空";
+        }
+
+        // 使用 "positional" 保留键直接传递 CLI 参数，
+        // 避免 AppendScriptArguments 的 NormalizeKey 将下划线转为连字符。
+        var cliArgs = new List<string>
+        {
+            query.Trim(),
+        };
+
+        if (maxResults is > 0)
+        {
+            cliArgs.Add("--max_results");
+            cliArgs.Add(Math.Clamp(maxResults.Value, 1, 10).ToString());
+        }
+        if (!string.IsNullOrWhiteSpace(domain))
+        {
+            cliArgs.Add("--domain");
+            cliArgs.Add(domain.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(subDomain))
+        {
+            cliArgs.Add("--sub_domain");
+            cliArgs.Add(subDomain.Trim());
+        }
+        if (!string.IsNullOrWhiteSpace(subDomainParams))
+        {
+            cliArgs.Add("--sdp");
+            cliArgs.Add(subDomainParams.Trim());
+        }
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["positional"] = cliArgs.ToArray(),
+        };
+
+        var scriptName = Path.Combine("scripts", "anysearch_cli.js");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "anysearch-skill", scriptName);
+
+        // logger.LogInformation(
+        //     "Explicit tool invoked. Tool: search_any, Query: {Query}, Domain: {Domain}, SubDomain: {SubDomain}",
+        //     query, domain, subDomain);
+        // WriteSkillDebugLog(
+        //     "EXPLICIT_TOOL_INVOKED",
+        //     $"Tool=search_any; Script={scriptName}; Query={query}; Domain={domain}; SubDomain={subDomain}");
+
+        var result = await ExecuteScriptAsync(
+            "anysearch-skill",
+            scriptName.Replace('\\', '/'),
+            scriptFullPath,
+            arguments,
+            subCommand: "search",
+            cancellationToken).ConfigureAwait(false);
+
+        return result?.ToString() ?? "(no output)";
+    }
+
+    /// <summary>
+    /// 使用 AnySearch 批量搜索，支持多查询并行执行和混合领域搜索。
+    /// </summary>
+    public async Task<string> BatchSearchAnyAsync(
+        AnySearchBatchQuery[] queries,
+        string? domain,
+        string? subDomain,
+        string? subDomainParams,
+        CancellationToken cancellationToken)
+    {
+        // 过滤 LLM 传递的 "None" 字符串（DashScope/Qwen 模型常将 None 序列化为字面字符串）
+        domain = FilterNone(domain);
+        subDomain = FilterNone(subDomain);
+        subDomainParams = FilterNone(subDomainParams);
+
+        if (queries is not { Length: > 0 })
+        {
+            return "Error: queries 不能为空";
+        }
+
+        var normalizedQueries = queries
+            .Where(static query => !string.IsNullOrWhiteSpace(query.Query))
+            .Select(query => new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["query"] = query.Query.Trim(),
+                ["max_results"] = query.MaxResults is > 0
+                    ? Math.Clamp(query.MaxResults.Value, 1, 10)
+                    : 5,
+                ["domain"] = FilterNone(query.Domain),
+                ["sub_domain"] = FilterNone(query.SubDomain),
+                ["sub_domain_params"] = FilterNone(query.SubDomainParams),
+            })
+            .Select(static item => item
+                .Where(static pair => pair.Value is not null)
+                .ToDictionary(static pair => pair.Key, static pair => pair.Value, StringComparer.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (normalizedQueries.Length == 0)
+        {
+            return "Error: queries 中至少要包含一个有效 query";
+        }
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["queries"] = normalizedQueries,
+        };
+        if (!string.IsNullOrWhiteSpace(domain))
+        {
+            arguments["domain"] = domain.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(subDomain))
+        {
+            arguments["sub_domain"] = subDomain.Trim();
+        }
+        if (!string.IsNullOrWhiteSpace(subDomainParams))
+        {
+            arguments["sub_domain_params"] = subDomainParams.Trim();
+        }
+
+        var scriptName = Path.Combine("scripts", "anysearch_cli.js");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "anysearch-skill", scriptName);
+
+        // logger.LogInformation(
+        //     "Explicit tool invoked. Tool: batch_search_any, Queries: {Queries}, Domain: {Domain}",
+        //     JsonSerializer.Serialize(normalizedQueries), domain);
+        // WriteSkillDebugLog(
+        //     "EXPLICIT_TOOL_INVOKED",
+        //     $"Tool=batch_search_any; Script={scriptName}; Domain={domain}; SubDomain={subDomain}; Queries={JsonSerializer.Serialize(normalizedQueries)}");
+
+        var result = await ExecuteScriptAsync(
+            "anysearch-skill",
+            scriptName.Replace('\\', '/'),
+            scriptFullPath,
+            arguments,
+            subCommand: "batch_search",
+            cancellationToken).ConfigureAwait(false);
+
+        return result?.ToString() ?? "(no output)";
+    }
+
+    /// <summary>
+    /// 将 LLM 传递的 "None" / "null" / "undefined" 等空值字符串标准化为 null。
+    /// DashScope/Qwen 模型在 function calling 时经常将 Python None 序列化为字面字符串。
+    /// </summary>
+    private static string? FilterNone(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var trimmed = value.Trim();
+        if (string.Equals(trimmed, "None", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "null", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(trimmed, "undefined", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return trimmed;
+    }
+
+    /// <summary>
+    /// 使用 AnySearch 提取网页正文内容，返回 Markdown 格式。
+    /// </summary>
+    public async Task<string> ExtractWebpageAnyAsync(string url, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+        {
+            return "Error: url 不能为空";
+        }
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["url"] = url.Trim(),
+        };
+
+        var scriptName = Path.Combine("scripts", "anysearch_cli.js");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "anysearch-skill", scriptName);
+
+        logger.LogInformation("Explicit tool invoked. Tool: extract_webpage_any, Url: {Url}", url);
+        // WriteSkillDebugLog(
+        //     "EXPLICIT_TOOL_INVOKED",
+        //     $"Tool=extract_webpage_any; Script={scriptName}; Url={url}");
+
+        var result = await ExecuteScriptAsync(
+            "anysearch-skill",
+            scriptName.Replace('\\', '/'),
+            scriptFullPath,
+            arguments,
+            subCommand: "extract",
+            cancellationToken).ConfigureAwait(false);
+
+        return result?.ToString() ?? "(no output)";
+    }
+
+    /// <summary>
+    /// 使用 AnySearch 获取指定领域的可用子域列表，用于垂直领域搜索前的发现。
+    /// </summary>
+    public async Task<string> GetSubDomainsAnyAsync(string[] domains, CancellationToken cancellationToken)
+    {
+        if (domains is not { Length: > 0 })
+        {
+            return "Error: domains 不能为空";
+        }
+
+        var arguments = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["domain"] = string.Join(",", domains),
+        };
+
+        var scriptName = Path.Combine("scripts", "anysearch_cli.js");
+        var scriptFullPath = Path.Combine(options.SkillRootPath, "anysearch-skill", scriptName);
+
+        logger.LogInformation(
+            "Explicit tool invoked. Tool: get_sub_domains_any, Domains: {Domains}",
+            string.Join(", ", domains));
+        // WriteSkillDebugLog(
+        //     "EXPLICIT_TOOL_INVOKED",
+        //     $"Tool=get_sub_domains_any; Script={scriptName}; Domains={string.Join(",", domains)}");
+
+        var result = await ExecuteScriptAsync(
+            "anysearch-skill",
+            scriptName.Replace('\\', '/'),
+            scriptFullPath,
+            arguments,
+            subCommand: "get_sub_domains",
+            cancellationToken).ConfigureAwait(false);
+
+        return result?.ToString() ?? "(no output)";
     }
 
     private static string CleanSchoolName(string name)
@@ -1023,6 +1300,109 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         }
     }
 
+    private async Task<object?> ExecuteScriptAsync(
+        string skillName,
+        string scriptName,
+        string scriptFullPath,
+        IReadOnlyDictionary<string, object?> arguments,
+        string? subCommand,
+        CancellationToken cancellationToken)
+    {
+        // logger.LogInformation(
+        //     "Executing skill script. Skill: {SkillName}, Script: {ScriptName}, SubCommand: {SubCommand}, Path: {ScriptPath}, Arguments: {Arguments}",
+        //     skillName,
+        //     scriptName,
+        //     subCommand,
+        //     scriptFullPath,
+        //     SerializeArguments(arguments));
+        if (!File.Exists(scriptFullPath))
+        {
+            WriteSkillDebugLog(
+                "SCRIPT_MISSING",
+                $"Skill={skillName}; Script={scriptName}; Path={scriptFullPath}; Arguments={SerializeArguments(arguments)}");
+            return $"Error: Script file not found: {scriptFullPath}";
+        }
+
+        try
+        {
+            var startInfo = subCommand is not null
+                ? BuildProcessStartInfo(scriptName, scriptFullPath, arguments, subCommand)
+                : BuildProcessStartInfo(scriptName, scriptFullPath, arguments);
+            var renderedCommand = RenderCommand(startInfo);
+
+            // WriteSkillDebugLog(
+            //     "SCRIPT_EXECUTING",
+            //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; Path={scriptFullPath}; WorkingDirectory={startInfo.WorkingDirectory}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}");
+
+            using var process = new Process { StartInfo = startInfo };
+
+            process.Start();
+
+            var stdOutTask = process.StandardOutput.ReadToEndAsync(cancellationToken);
+            var stdErrTask = process.StandardError.ReadToEndAsync(cancellationToken);
+            var exitTask = process.WaitForExitAsync(cancellationToken);
+            var timeoutTask = Task.Delay(options.SkillTimeout, cancellationToken);
+
+            var completedTask = await Task.WhenAny(Task.WhenAll(stdOutTask, stdErrTask, exitTask), timeoutTask).ConfigureAwait(false);
+            if (completedTask == timeoutTask)
+            {
+                TryKill(process);
+                // WriteSkillDebugLog(
+                //     "SCRIPT_TIMEOUT",
+                //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; Command={renderedCommand}; TimeoutSeconds={options.SkillTimeout.TotalSeconds:0}; Arguments={SerializeArguments(arguments)}");
+                return $"Error: Script '{scriptName}' timed out after {options.SkillTimeout.TotalSeconds:0} seconds.";
+            }
+
+            var stdOut = await stdOutTask.ConfigureAwait(false);
+            var stdErr = await stdErrTask.ConfigureAwait(false);
+
+            if (process.ExitCode != 0)
+            {
+                logger.LogWarning(
+                    "Skill script failed. Skill: {SkillName}, Script: {ScriptName}, Error: {Error}",
+                    skillName,
+                    scriptName,
+                    stdErr);
+
+                // WriteSkillDebugLog(
+                //     "SCRIPT_FAILED",
+                //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; ExitCode={process.ExitCode}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}; StdOut={TruncateForDebugLog(stdOut)}; StdErr={TruncateForDebugLog(stdErr)}");
+
+                return string.IsNullOrWhiteSpace(stdErr)
+                    ? $"Error: Script '{scriptName}' exited with code {process.ExitCode}."
+                    : $"Error: {stdErr.Trim()}";
+            }
+
+            var output = string.IsNullOrWhiteSpace(stdOut) ? stdErr : stdOut;
+            var normalizedOutput = string.IsNullOrWhiteSpace(output) ? "(no output)" : output.Trim();
+
+            // logger.LogInformation(
+            //     "Skill script completed. Skill: {SkillName}, Script: {ScriptName}, Arguments: {Arguments}, Result: {Result}",
+            //     skillName,
+            //     scriptName,
+            //     SerializeArguments(arguments),
+            //     TruncateForLog(normalizedOutput));
+
+            // WriteSkillDebugLog(
+            //     "SCRIPT_COMPLETED",
+            //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; ExitCode={process.ExitCode}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}; StdOut={TruncateForDebugLog(stdOut)}; StdErr={TruncateForDebugLog(stdErr)}; Result={TruncateForDebugLog(normalizedOutput)}");
+
+            return normalizedOutput;
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Skill script execution failed. Skill: {SkillName}, Script: {ScriptName}", skillName, scriptName);
+            // WriteSkillDebugLog(
+            //     "SCRIPT_EXCEPTION",
+            //     $"Skill={skillName}; Script={scriptName}; Path={scriptFullPath}; Arguments={SerializeArguments(arguments)}; Exception={exception}");
+            return $"Error: Failed to execute script '{scriptName}': {exception.Message}";
+        }
+    }
+
     private ProcessStartInfo BuildProcessStartInfo(
         string scriptName,
         string scriptFullPath,
@@ -1038,6 +1418,22 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         };
     }
 
+    private ProcessStartInfo BuildProcessStartInfo(
+        string scriptName,
+        string scriptFullPath,
+        IReadOnlyDictionary<string, object?> arguments,
+        string subCommand)
+    {
+        var extension = Path.GetExtension(scriptFullPath).ToLowerInvariant();
+
+        return extension switch
+        {
+            ".js" => BuildJavaScriptStartInfo(scriptName, scriptFullPath, arguments, subCommand),
+            ".py" => BuildPythonStartInfo(scriptName, scriptFullPath, arguments, subCommand),
+            _ => BuildGenericStartInfo(scriptName, scriptFullPath, arguments, subCommand),
+        };
+    }
+
     private ProcessStartInfo BuildJavaScriptStartInfo(
         string scriptName,
         string scriptFullPath,
@@ -1046,6 +1442,28 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         var skillRoot = GetSkillRoot(scriptFullPath);
         var startInfo = CreateStartInfo(options.NodeCommand, skillRoot);
         startInfo.ArgumentList.Add(GetScriptInvocationPath(scriptFullPath, skillRoot));
+        AppendScriptArguments(startInfo.ArgumentList, scriptName, arguments);
+
+        return startInfo;
+    }
+
+    private ProcessStartInfo BuildJavaScriptStartInfo(
+        string scriptName,
+        string scriptFullPath,
+        IReadOnlyDictionary<string, object?> arguments,
+        string subCommand)
+    {
+        var skillRoot = GetSkillRoot(scriptFullPath);
+        var startInfo = CreateStartInfo(options.NodeCommand, skillRoot);
+        startInfo.ArgumentList.Add(GetScriptInvocationPath(scriptFullPath, skillRoot));
+        startInfo.ArgumentList.Add(subCommand);
+
+        if (IsAnySearchBatchSearch(scriptFullPath, subCommand))
+        {
+            AppendAnySearchBatchArguments(startInfo.ArgumentList, arguments);
+            return startInfo;
+        }
+
         AppendScriptArguments(startInfo.ArgumentList, scriptName, arguments);
 
         return startInfo;
@@ -1085,6 +1503,42 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         return startInfo;
     }
 
+    private ProcessStartInfo BuildPythonStartInfo(
+        string scriptName,
+        string scriptFullPath,
+        IReadOnlyDictionary<string, object?> arguments,
+        string subCommand)
+    {
+        var skillRoot = GetSkillRoot(scriptFullPath);
+        var startInfo = ShouldRunPythonAsModule(scriptFullPath)
+            ? CreateStartInfo(options.PythonCommand, skillRoot)
+            : CreateStartInfo(options.PythonCommand, Path.GetDirectoryName(scriptFullPath) ?? skillRoot);
+
+        startInfo.Environment["PYTHONIOENCODING"] = "utf-8";
+
+        if (ShouldRunPythonAsModule(scriptFullPath))
+        {
+            var moduleName = Path.GetFileName(Path.GetDirectoryName(scriptFullPath)) ?? "scripts";
+            startInfo.ArgumentList.Add("-m");
+            startInfo.ArgumentList.Add(moduleName);
+
+            var scriptStem = Path.GetFileNameWithoutExtension(scriptName);
+            if (!string.Equals(scriptStem, "__main__", StringComparison.OrdinalIgnoreCase))
+            {
+                startInfo.ArgumentList.Add(scriptStem);
+            }
+        }
+        else
+        {
+            startInfo.ArgumentList.Add(scriptFullPath);
+        }
+
+        startInfo.ArgumentList.Add(subCommand);
+        AppendScriptArguments(startInfo.ArgumentList, scriptName, arguments);
+
+        return startInfo;
+    }
+
     private ProcessStartInfo BuildGenericStartInfo(
         string scriptName,
         string scriptFullPath,
@@ -1112,6 +1566,35 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         return startInfo;
     }
 
+    private ProcessStartInfo BuildGenericStartInfo(
+        string scriptName,
+        string scriptFullPath,
+        IReadOnlyDictionary<string, object?> arguments,
+        string subCommand)
+    {
+        var extension = Path.GetExtension(scriptFullPath).ToLowerInvariant();
+        var interpreter = extension switch
+        {
+            ".py" => options.PythonCommand,
+            ".js" => options.NodeCommand,
+            ".ps1" => "pwsh",
+            _ => null,
+        };
+
+        var workingDirectory = Path.GetDirectoryName(scriptFullPath) ?? Directory.GetCurrentDirectory();
+        var startInfo = CreateStartInfo(interpreter ?? scriptFullPath, workingDirectory);
+
+        if (interpreter is not null)
+        {
+            startInfo.ArgumentList.Add(scriptFullPath);
+        }
+
+        startInfo.ArgumentList.Add(subCommand);
+        AppendScriptArguments(startInfo.ArgumentList, scriptName, arguments);
+
+        return startInfo;
+    }
+
     private static bool ShouldRunPythonAsModule(string scriptFullPath)
     {
         var scriptDirectory = Path.GetDirectoryName(scriptFullPath);
@@ -1128,6 +1611,41 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
     {
         var relativePath = Path.GetRelativePath(workingDirectory, scriptFullPath);
         return string.IsNullOrWhiteSpace(relativePath) ? scriptFullPath : relativePath;
+    }
+
+    private static bool IsAnySearchBatchSearch(string scriptFullPath, string subCommand)
+        => string.Equals(Path.GetFileName(scriptFullPath), "anysearch_cli.js", StringComparison.OrdinalIgnoreCase)
+            && string.Equals(subCommand, "batch_search", StringComparison.OrdinalIgnoreCase);
+
+    private static void AppendAnySearchBatchArguments(
+        Collection<string> arguments,
+        IReadOnlyDictionary<string, object?> values)
+    {
+        if (!TryGetArgument(values, "queries", out var queriesValue) || queriesValue is null)
+        {
+            return;
+        }
+
+        arguments.Add("--queries");
+        arguments.Add(SerializeArgumentForCli(queriesValue));
+
+        if (GetStringArgument(values, "domain") is { Length: > 0 } domain)
+        {
+            arguments.Add("--domain");
+            arguments.Add(domain);
+        }
+
+        if (GetStringArgument(values, "sub_domain", "subDomain") is { Length: > 0 } subDomain)
+        {
+            arguments.Add("--sub_domain");
+            arguments.Add(subDomain);
+        }
+
+        if (GetStringArgument(values, "sub_domain_params", "subDomainParams") is { Length: > 0 } subDomainParams)
+        {
+            arguments.Add("--sub_domain_params");
+            arguments.Add(subDomainParams);
+        }
     }
 
     private static void AppendScriptArguments(
@@ -1372,7 +1890,22 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         }
 
         arguments.Add(normalizedKey);
-        arguments.Add(value.ToString() ?? string.Empty);
+        arguments.Add(SerializeArgumentForCli(value));
+    }
+
+    private static string SerializeArgumentForCli(object value)
+    {
+        return value switch
+        {
+            JsonElement jsonElement when jsonElement.ValueKind is JsonValueKind.Array or JsonValueKind.Object
+                => jsonElement.GetRawText(),
+            JsonElement jsonElement => jsonElement.ToString(),
+            string text => text,
+            System.Collections.IDictionary or System.Collections.IEnumerable
+                when value is not string
+                => JsonSerializer.Serialize(NormalizeArgumentValue(value), LogJsonOptions),
+            _ => value.ToString() ?? string.Empty,
+        };
     }
 
     private static string NormalizeKey(string key)

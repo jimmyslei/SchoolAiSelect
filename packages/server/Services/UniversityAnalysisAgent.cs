@@ -30,13 +30,17 @@ public sealed class UniversityAnalysisAgent
             throw new InvalidOperationException("未配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY，无法初始化大学分析 Agent");
 
         var fixerHandler = new DashScopeResponseFixerHandler();
-        var httpClient = new HttpClient(fixerHandler);
+        var httpClient = new HttpClient(fixerHandler)
+        {
+            Timeout = options.DashScopeNetworkTimeout + TimeSpan.FromSeconds(10),
+        };
 
         var openAiClient = new OpenAIClient(
             new ApiKeyCredential(options.DashScopeApiKey),
             new OpenAIClientOptions
             {
                 Endpoint = new Uri(options.DashScopeBaseUrl, UriKind.Absolute),
+                NetworkTimeout = options.DashScopeNetworkTimeout,
                 Transport = new HttpClientPipelineTransport(httpClient),
             });
 
