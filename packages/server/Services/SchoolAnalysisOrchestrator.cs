@@ -19,6 +19,7 @@ public sealed class SchoolAnalysisOrchestrator(
     public async IAsyncEnumerable<(string SchoolId, SchoolAnalysis Analysis)> AnalyzeStreamAsync(
         IReadOnlyList<School> schools,
         int? studentScore,
+        IAgentProgressReporter? progressReporter,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var channel = Channel.CreateUnbounded<(string SchoolId, SchoolAnalysis Analysis)>(new UnboundedChannelOptions
@@ -45,7 +46,7 @@ public sealed class SchoolAnalysisOrchestrator(
                         try
                         {
                             logger.LogInformation("[Analyze:Start] {SchoolName}", school.Name);
-                            analysis = await analysisAgent.AnalyzeAsync(school, studentScore, cancellationToken);
+                            analysis = await analysisAgent.AnalyzeAsync(school, studentScore, progressReporter, cancellationToken);
                             logger.LogInformation("[Analyze:Done] {SchoolName} 耗时 {Elapsed}ms", school.Name, sw.ElapsedMilliseconds);
                         }
                         catch (OperationCanceledException)
@@ -97,4 +98,10 @@ public sealed class SchoolAnalysisOrchestrator(
         "暂无充分的学生活动公开数据。",
         [],
         AdmissionCutoffScores: null);
+
+    public IAsyncEnumerable<(string SchoolId, SchoolAnalysis Analysis)> AnalyzeStreamAsync(
+        IReadOnlyList<School> schools,
+        int? studentScore,
+        CancellationToken cancellationToken)
+        => AnalyzeStreamAsync(schools, studentScore, progressReporter: null, cancellationToken);
 }

@@ -23,6 +23,7 @@ public sealed class UniversityAnalysisOrchestrator(
         IReadOnlyList<string> universityNames,
         int studentScore,
         IReadOnlyList<string>? preferredMajors,
+        IAgentProgressReporter? progressReporter,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var channel = Channel.CreateUnbounded<(string UniversityName, UniversityAnalysis Analysis)>(new UnboundedChannelOptions
@@ -49,7 +50,7 @@ public sealed class UniversityAnalysisOrchestrator(
                         try
                         {
                             logger.LogInformation("[UniAnalyze:Start] {University}", name);
-                            analysis = await analysisAgent.AnalyzeUniversityAsync(name, studentScore, preferredMajors, cancellationToken);
+                            analysis = await analysisAgent.AnalyzeUniversityAsync(name, studentScore, preferredMajors, progressReporter, cancellationToken);
                             logger.LogInformation("[UniAnalyze:Done] {University} 耗时 {Elapsed}ms", name, sw.ElapsedMilliseconds);
                         }
                         catch (OperationCanceledException)
@@ -97,4 +98,11 @@ public sealed class UniversityAnalysisOrchestrator(
             AdmissionMatchScore: 50,
             Summary: $"暂无法获取 {name} 的详细数据。");
     }
+
+    public IAsyncEnumerable<(string UniversityName, UniversityAnalysis Analysis)> AnalyzeStreamAsync(
+        IReadOnlyList<string> universityNames,
+        int studentScore,
+        IReadOnlyList<string>? preferredMajors,
+        CancellationToken cancellationToken)
+        => AnalyzeStreamAsync(universityNames, studentScore, preferredMajors, progressReporter: null, cancellationToken);
 }

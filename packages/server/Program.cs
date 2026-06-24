@@ -30,7 +30,7 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .WriteTo.Console()
     .WriteTo.Logger(lc => lc
-        .Filter.ByExcluding(e => e.Level >= LogEventLevel.Information && e.Level != LogEventLevel.Error)
+        .Filter.ByExcluding(e => e.Level >= LogEventLevel.Debug)
         .WriteTo.File(
             path: "logs/info-.log",
             rollingInterval: RollingInterval.Day,
@@ -115,6 +115,7 @@ builder.Services.AddHttpClient<AmapService>(client =>
     client.BaseAddress = new Uri("https://restapi.amap.com/");
     client.Timeout = TimeSpan.FromSeconds(30);
 });
+builder.Services.AddSingleton<AgentProgressContext>();
 builder.Services.AddSingleton<LocalSkillScriptRunner>();
 builder.Services.AddSingleton<SchoolAnalysisAgent>();
 builder.Services.AddSingleton<SchoolAnalysisOrchestrator>();
@@ -171,6 +172,10 @@ app.MapGet("/api/health", (SchoolServiceOptions svcOptions) =>
             {
                 model = svcOptions.DashScopeModel,
                 dashScopeNetworkTimeoutSeconds = (int)svcOptions.DashScopeNetworkTimeout.TotalSeconds,
+                dashScopeRateLimitMaxRetries = svcOptions.DashScopeRateLimitMaxRetries,
+                dashScopeRateLimitBaseDelayMs = (int)svcOptions.DashScopeRateLimitBaseDelay.TotalMilliseconds,
+                dashScopeRateLimitMaxDelayMs = (int)svcOptions.DashScopeRateLimitMaxDelay.TotalMilliseconds,
+                dashScopeMinRequestIntervalMs = (int)svcOptions.DashScopeMinRequestInterval.TotalMilliseconds,
                 maxConcurrency = svcOptions.AnalysisMaxConcurrency,
                 amapPageSize = svcOptions.AmapPageSize,
                 skillTimeoutSeconds = (int)svcOptions.SkillTimeout.TotalSeconds,
@@ -493,29 +498,15 @@ schoolGroup.MapPost("/search",
 
         var radius = request.Radius is > 0 and <= 20000 ? request.Radius.Value : 5000;
 
-        httpContext.Response.StatusCode = StatusCodes.Status200OK;
-        httpContext.Response.ContentType = "text/event-stream; charset=utf-8";
-        httpContext.Response.Headers.CacheControl = "no-cache";
-        httpContext.Response.Headers.Connection = "keep-alive";
-        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+        ConfigureSseResponse(httpContext);
 
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var writeLock = new SemaphoreSlim(1, 1);
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task? heartbeatTask = null;
 
-        async Task WriteEventAsync(string eventName, object payload)
-        {
-            var json = JsonSerializer.Serialize(payload, jsonOptions);
-            var sb = new StringBuilder();
-            sb.Append("event: ").Append(eventName).Append('\n');
-            // 数据需要按行前缀，data 中不能含未转义换行
-            foreach (var line in json.Split('\n'))
-            {
-                sb.Append("data: ").Append(line).Append('\n');
-            }
-            sb.Append('\n');
-            var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-            await httpContext.Response.Body.WriteAsync(bytes, cancellationToken);
-            await httpContext.Response.Body.FlushAsync(cancellationToken);
-        }
+        Task WriteEventAsync(string eventName, object payload)
+            => WriteSseEventAsync(httpContext, writeLock, jsonOptions, eventName, payload, cancellationToken);
 
         try
         {
@@ -533,6 +524,7 @@ schoolGroup.MapPost("/search",
                 searchRadius = radius,
                 totalFound = schools.Length,
             });
+            heartbeatTask = RunSseHeartbeatAsync(httpContext, writeLock, TimeSpan.FromSeconds(10), heartbeatCts.Token);
 
             if (schools.Length == 0)
             {
@@ -546,8 +538,10 @@ schoolGroup.MapPost("/search",
 
             var schoolMap = schools.ToDictionary(s => s.Id, StringComparer.OrdinalIgnoreCase);
             var analyses = new Dictionary<string, SchoolAnalysis>(StringComparer.OrdinalIgnoreCase);
+            var progressReporter = new DelegateAgentProgressReporter(
+                (step, ct) => new ValueTask(WriteEventAsync("agent_step", new { step })));
 
-            await foreach (var (schoolId, analysis) in orchestrator.AnalyzeStreamAsync(schools, request.StudentScore, cancellationToken))
+            await foreach (var (schoolId, analysis) in orchestrator.AnalyzeStreamAsync(schools, request.StudentScore, progressReporter, cancellationToken))
             {
                 analyses[schoolId] = analysis;
                 if (!schoolMap.TryGetValue(schoolId, out var school))
@@ -596,7 +590,7 @@ schoolGroup.MapPost("/search",
                 var summary = $"共分析 {rankings.Count} 所学校";
                 var requestJson = JsonSerializer.Serialize(request, jsonOptions);
                 var resultJson = JsonSerializer.Serialize(donePayload, jsonOptions);
-                await historyService.SaveAsync(user.Id, "school", title, requestJson, resultJson, summary, cancellationToken);
+                await historyService.SaveAsync(user.Id, request.SchoolType, title, requestJson, resultJson, summary, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -619,6 +613,11 @@ schoolGroup.MapPost("/search",
                 // best-effort error notification
             }
         }
+        finally
+        {
+            await StopHeartbeatAsync(heartbeatCts, heartbeatTask);
+            writeLock.Dispose();
+        }
     })
     .WithName("SearchSchools")
     .WithSummary("搜索附近学校并以 SSE 流式返回分析与排名");
@@ -628,6 +627,113 @@ static async Task WriteJsonErrorAsync(HttpContext context, int statusCode, strin
     context.Response.StatusCode = statusCode;
     context.Response.ContentType = "application/json; charset=utf-8";
     await context.Response.WriteAsJsonAsync(ApiResponse<object>.Fail(message), cancellationToken);
+}
+
+static void ConfigureSseResponse(HttpContext context)
+{
+    context.Response.StatusCode = StatusCodes.Status200OK;
+    context.Response.ContentType = "text/event-stream; charset=utf-8";
+    context.Response.Headers.CacheControl = "no-cache, no-transform";
+    context.Response.Headers.Connection = "keep-alive";
+    context.Response.Headers["X-Accel-Buffering"] = "no";
+}
+
+static async Task WriteSseEventAsync(
+    HttpContext context,
+    SemaphoreSlim writeLock,
+    JsonSerializerOptions jsonOptions,
+    string eventName,
+    object payload,
+    CancellationToken cancellationToken)
+{
+    await writeLock.WaitAsync(cancellationToken);
+    try
+    {
+        var json = JsonSerializer.Serialize(payload, jsonOptions);
+        var sb = new StringBuilder();
+        sb.Append("event: ").Append(eventName).Append('\n');
+        foreach (var line in json.Split('\n'))
+        {
+            sb.Append("data: ").Append(line).Append('\n');
+        }
+
+        sb.Append('\n');
+        var bytes = Encoding.UTF8.GetBytes(sb.ToString());
+        await context.Response.Body.WriteAsync(bytes, cancellationToken);
+        await context.Response.Body.FlushAsync(cancellationToken);
+    }
+    finally
+    {
+        writeLock.Release();
+    }
+}
+
+static async Task WriteSseCommentAsync(
+    HttpContext context,
+    SemaphoreSlim writeLock,
+    string comment,
+    CancellationToken cancellationToken)
+{
+    await writeLock.WaitAsync(cancellationToken);
+    try
+    {
+        var payload = Encoding.UTF8.GetBytes($": {comment}\n\n");
+        await context.Response.Body.WriteAsync(payload, cancellationToken);
+        await context.Response.Body.FlushAsync(cancellationToken);
+    }
+    finally
+    {
+        writeLock.Release();
+    }
+}
+
+static Task RunSseHeartbeatAsync(
+    HttpContext context,
+    SemaphoreSlim writeLock,
+    TimeSpan interval,
+    CancellationToken cancellationToken)
+{
+    return Task.Run(async () =>
+    {
+        using var timer = new PeriodicTimer(interval);
+        try
+        {
+            while (await timer.WaitForNextTickAsync(cancellationToken))
+            {
+                await WriteSseCommentAsync(context, writeLock, "keepalive", cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // request ended
+        }
+    }, CancellationToken.None);
+}
+
+static async Task StopHeartbeatAsync(CancellationTokenSource heartbeatCts, Task? heartbeatTask)
+{
+    if (heartbeatTask is null)
+    {
+        return;
+    }
+
+    try
+    {
+        await heartbeatCts.CancelAsync();
+    }
+    catch (ObjectDisposedException)
+    {
+        return;
+    }
+
+    try
+    {
+        await heartbeatTask;
+    }
+    catch (OperationCanceledException)
+    {
+        // ignore
+    }
 }
 
 schoolGroup.MapGet("/{id}",
@@ -732,28 +838,15 @@ universityGroup.MapPost("/search",
             return;
         }
 
-        httpContext.Response.StatusCode = StatusCodes.Status200OK;
-        httpContext.Response.ContentType = "text/event-stream; charset=utf-8";
-        httpContext.Response.Headers.CacheControl = "no-cache";
-        httpContext.Response.Headers.Connection = "keep-alive";
-        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+        ConfigureSseResponse(httpContext);
 
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var writeLock = new SemaphoreSlim(1, 1);
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task? heartbeatTask = null;
 
-        async Task WriteEventAsync(string eventName, object payload)
-        {
-            var json = JsonSerializer.Serialize(payload, jsonOptions);
-            var sb = new StringBuilder();
-            sb.Append("event: ").Append(eventName).Append('\n');
-            foreach (var line in json.Split('\n'))
-            {
-                sb.Append("data: ").Append(line).Append('\n');
-            }
-            sb.Append('\n');
-            var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-            await httpContext.Response.Body.WriteAsync(bytes, cancellationToken);
-            await httpContext.Response.Body.FlushAsync(cancellationToken);
-        }
+        Task WriteEventAsync(string eventName, object payload)
+            => WriteSseEventAsync(httpContext, writeLock, jsonOptions, eventName, payload, cancellationToken);
 
         try
         {
@@ -764,11 +857,14 @@ universityGroup.MapPost("/search",
                 preferredMajors = request.PreferredMajors,
                 totalCount = request.UniversityNames.Count,
             });
+            heartbeatTask = RunSseHeartbeatAsync(httpContext, writeLock, TimeSpan.FromSeconds(10), heartbeatCts.Token);
 
             var analyses = new List<UniversityAnalysis>();
+            var progressReporter = new DelegateAgentProgressReporter(
+                (step, ct) => new ValueTask(WriteEventAsync("agent_step", new { step })));
 
             await foreach (var (universityName, analysis) in orchestrator.AnalyzeStreamAsync(
-                request.UniversityNames, request.StudentScore, request.PreferredMajors, cancellationToken))
+                request.UniversityNames, request.StudentScore, request.PreferredMajors, progressReporter, cancellationToken))
             {
                 analyses.Add(analysis);
                 await WriteEventAsync("analysis", new
@@ -816,6 +912,11 @@ universityGroup.MapPost("/search",
             }
             catch { }
         }
+        finally
+        {
+            await StopHeartbeatAsync(heartbeatCts, heartbeatTask);
+            writeLock.Dispose();
+        }
     })
     .WithName("SearchUniversities")
     .WithSummary("根据高考成绩和意向大学，分析录取分数线与专业信息，推荐报考排名");
@@ -857,28 +958,15 @@ highSchoolGroup.MapPost("/recommend",
             return;
         }
 
-        httpContext.Response.StatusCode = StatusCodes.Status200OK;
-        httpContext.Response.ContentType = "text/event-stream; charset=utf-8";
-        httpContext.Response.Headers.CacheControl = "no-cache";
-        httpContext.Response.Headers.Connection = "keep-alive";
-        httpContext.Response.Headers["X-Accel-Buffering"] = "no";
+        ConfigureSseResponse(httpContext);
 
         var jsonOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web);
+        var writeLock = new SemaphoreSlim(1, 1);
+        using var heartbeatCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Task? heartbeatTask = null;
 
-        async Task WriteEventAsync(string eventName, object payload)
-        {
-            var json = JsonSerializer.Serialize(payload, jsonOptions);
-            var sb = new StringBuilder();
-            sb.Append("event: ").Append(eventName).Append('\n');
-            foreach (var line in json.Split('\n'))
-            {
-                sb.Append("data: ").Append(line).Append('\n');
-            }
-            sb.Append('\n');
-            var bytes = Encoding.UTF8.GetBytes(sb.ToString());
-            await httpContext.Response.Body.WriteAsync(bytes, cancellationToken);
-            await httpContext.Response.Body.FlushAsync(cancellationToken);
-        }
+        Task WriteEventAsync(string eventName, object payload)
+            => WriteSseEventAsync(httpContext, writeLock, jsonOptions, eventName, payload, cancellationToken);
 
         try
         {
@@ -887,11 +975,17 @@ highSchoolGroup.MapPost("/recommend",
                 studentScore = request.StudentScore,
                 province = request.Province,
             });
+            heartbeatTask = RunSseHeartbeatAsync(httpContext, writeLock, TimeSpan.FromSeconds(10), heartbeatCts.Token);
+
+            var progressReporter = new DelegateAgentProgressReporter(
+                (step, ct) => new ValueTask(WriteEventAsync("agent_step", new { step })));
 
             var recommendations = await agent.RecommendAsync(
                 request.StudentScore,
                 request.Province,
-                cancellationToken);
+                progressReporter,
+                cancellationToken,
+                request.City);
 
             if (recommendations.Count == 0)
             {
@@ -937,6 +1031,11 @@ highSchoolGroup.MapPost("/recommend",
                 await WriteEventAsync("error", new { message = exception.Message });
             }
             catch { }
+        }
+        finally
+        {
+            await StopHeartbeatAsync(heartbeatCts, heartbeatTask);
+            writeLock.Dispose();
         }
     })
     .WithName("RecommendHighSchools")

@@ -39,7 +39,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble"
+                  "$ref": "#/components/schemas/AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndintAndintAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble"
                 }
               }
             }
@@ -831,7 +831,7 @@
   },
   "components": {
     "schemas": {
-      "AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble": {
+      "AnonymousTypeOfstringAndDateTimeOffsetAndAnonymousTypeOfstringAndintAndintAndintAndintAndintAndintAndintAndintAndstringAndbooleanAndAnonymousTypeOfstringAndstringAndintAnddouble": {
         "required": [
           "status",
           "timestamp",
@@ -851,17 +851,21 @@
             "format": "date-time"
           },
           "configuration": {
-            "$ref": "#/components/schemas/AnonymousTypeOfstringAndintAndintAndintAndintAndstringAndboolean"
+            "$ref": "#/components/schemas/AnonymousTypeOfstringAndintAndintAndintAndintAndintAndintAndintAndintAndstringAndboolean"
           },
           "environment": {
             "$ref": "#/components/schemas/AnonymousTypeOfstringAndstringAndintAnddouble"
           }
         }
       },
-      "AnonymousTypeOfstringAndintAndintAndintAndintAndstringAndboolean": {
+      "AnonymousTypeOfstringAndintAndintAndintAndintAndintAndintAndintAndintAndstringAndboolean": {
         "required": [
           "model",
           "dashScopeNetworkTimeoutSeconds",
+          "dashScopeRateLimitMaxRetries",
+          "dashScopeRateLimitBaseDelayMs",
+          "dashScopeRateLimitMaxDelayMs",
+          "dashScopeMinRequestIntervalMs",
           "maxConcurrency",
           "amapPageSize",
           "skillTimeoutSeconds",
@@ -877,6 +881,38 @@
             ]
           },
           "dashScopeNetworkTimeoutSeconds": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "dashScopeRateLimitMaxRetries": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "dashScopeRateLimitBaseDelayMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "dashScopeRateLimitMaxDelayMs": {
+            "pattern": "^-?(?:0|[1-9]\\d*)$",
+            "type": [
+              "integer",
+              "string"
+            ],
+            "format": "int32"
+          },
+          "dashScopeMinRequestIntervalMs": {
             "pattern": "^-?(?:0|[1-9]\\d*)$",
             "type": [
               "integer",
@@ -1449,6 +1485,12 @@
           },
           "province": {
             "type": "string"
+          },
+          "city": {
+            "type": [
+              "null",
+              "string"
+            ]
           }
         }
       },

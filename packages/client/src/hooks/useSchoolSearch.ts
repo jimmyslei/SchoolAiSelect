@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type {
+  AgentExecutionStep,
   SchoolAnalysis,
   SchoolRanking,
   SchoolType,
@@ -29,6 +30,7 @@ export function useSchoolSearch() {
   const [locationAddress, setLocationAddress] = useState("");
   const [analyzedCount, setAnalyzedCount] = useState(0);
   const [totalCount, setTotalCount] = useState(0);
+  const [agentSteps, setAgentSteps] = useState<AgentExecutionStep[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -52,6 +54,7 @@ export function useSchoolSearch() {
       setRankings([]);
       setAnalyzedCount(0);
       setTotalCount(0);
+      setAgentSteps([]);
 
       const rankingMap = new Map<string, SchoolRanking>();
 
@@ -102,6 +105,8 @@ export function useSchoolSearch() {
             });
             setRankings(Array.from(rankingMap.values()));
             setAnalyzedCount((count) => count + 1);
+          } else if (event.type === "agent_step") {
+            setAgentSteps((current) => [...current, event.step]);
           } else if (event.type === "done") {
             if (event.rankings && event.rankings.length > 0) {
               setRankings(event.rankings);
@@ -140,6 +145,7 @@ export function useSchoolSearch() {
     setLocationAddress("");
     setAnalyzedCount(0);
     setTotalCount(0);
+    setAgentSteps([]);
   }, []);
 
   useEffect(() => {
@@ -156,6 +162,7 @@ export function useSchoolSearch() {
     locationAddress,
     analyzedCount,
     totalCount,
+    agentSteps,
     search,
     reset,
   };

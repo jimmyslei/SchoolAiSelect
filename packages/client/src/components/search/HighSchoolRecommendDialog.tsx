@@ -1,45 +1,13 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { motion } from "framer-motion";
 import { GraduationCap, MapPin, Target } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { getProvinces, getCitiesByProvince } from "@/data/provinceCities";
 
-const PROVINCES = [
-  "北京市",
-  "天津市",
-  "上海市",
-  "重庆市",
-  "河北省",
-  "山西省",
-  "辽宁省",
-  "吉林省",
-  "黑龙江省",
-  "江苏省",
-  "浙江省",
-  "安徽省",
-  "福建省",
-  "江西省",
-  "山东省",
-  "河南省",
-  "湖北省",
-  "湖南省",
-  "广东省",
-  "海南省",
-  "四川省",
-  "贵州省",
-  "云南省",
-  "陕西省",
-  "甘肃省",
-  "青海省",
-  "台湾省",
-  "内蒙古自治区",
-  "广西壮族自治区",
-  "西藏自治区",
-  "宁夏回族自治区",
-  "新疆维吾尔自治区",
-];
+const PROVINCES = getProvinces();
 
 interface HighSchoolRecommendDialogProps {
-  onConfirm: (studentScore: number, province: string) => void;
+  onConfirm: (studentScore: number, province: string, city?: string) => void;
   onCancel: () => void;
 }
 
@@ -49,7 +17,13 @@ export function HighSchoolRecommendDialog({
 }: HighSchoolRecommendDialogProps) {
   const [studentScore, setStudentScore] = useState<string>("");
   const [province, setProvince] = useState<string>("");
+  const [city, setCity] = useState<string>("");
   const [scoreError, setScoreError] = useState<string>("");
+
+  // 根据选中的省份获取地级市列表
+  const cities = useMemo(() => {
+    return province ? getCitiesByProvince(province) : [];
+  }, [province]);
 
   const handleScoreChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -72,8 +46,8 @@ export function HighSchoolRecommendDialog({
       }
       return;
     }
-    onConfirm(score, province);
-  }, [canSubmit, score, province, onConfirm]);
+    onConfirm(score, province, city || undefined);
+  }, [canSubmit, score, province, city, onConfirm]);
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
@@ -135,14 +109,17 @@ export function HighSchoolRecommendDialog({
         </div>
 
         {/* Province Select */}
-        <div className="mb-6">
+        <div className="mb-5">
           <label className="mb-2 flex items-center gap-2 text-sm font-medium text-neutral-700">
             <MapPin className="h-4 w-4 text-green-500" />
             所在省份
           </label>
           <select
             value={province}
-            onChange={(e) => setProvince(e.target.value)}
+            onChange={(e) => {
+              setProvince(e.target.value);
+              setCity(""); // 重置城市选择
+            }}
             className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-base text-neutral-900 shadow-sm outline-none transition-all focus:border-green-400 focus:ring-2 focus:ring-green-200"
           >
             <option value="">请选择省份</option>
@@ -152,10 +129,39 @@ export function HighSchoolRecommendDialog({
               </option>
             ))}
           </select>
-          <p className="mt-1.5 text-xs text-neutral-400">
-            系统将根据该省份高中的历年录取分数线进行分析
-          </p>
         </div>
+
+        {/* City Select - 仅在选择省份后显示 */}
+        {province && cities.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            className="mb-6"
+          >
+            <label className="mb-2 flex items-center gap-2 text-sm font-medium text-neutral-700">
+              <MapPin className="h-4 w-4 text-emerald-500" />
+              所在城市
+              <span className="text-xs font-normal text-neutral-400">
+                (可选)
+              </span>
+            </label>
+            <select
+              value={city}
+              onChange={(e) => setCity(e.target.value)}
+              className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-base text-neutral-900 shadow-sm outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200"
+            >
+              <option value="">全部城市</option>
+              {cities.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <p className="mt-1.5 text-xs text-neutral-400">
+              选择具体城市可获得更精准的推荐结果
+            </p>
+          </motion.div>
+        )}
 
         {/* Preview */}
         {canSubmit && (
@@ -165,7 +171,11 @@ export function HighSchoolRecommendDialog({
             className="mb-6 rounded-xl bg-gradient-to-r from-green-50 to-emerald-50/50 px-4 py-3 border border-green-100/60"
           >
             <p className="text-sm text-green-800">
-              将根据 <span className="font-semibold">{province}</span>{" "}
+              将根据{" "}
+              <span className="font-semibold">
+                {province}
+                {city ? ` ${city}` : ""}
+              </span>{" "}
               高中的录取数据， 为{" "}
               <span className="font-semibold">{score} 分</span>{" "}
               的成绩推荐冲/稳/保三档学校

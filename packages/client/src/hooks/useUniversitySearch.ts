@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type {
+  AgentExecutionStep,
   UniversityAnalysis,
   UniversityRanking,
   UniversitySearchStatus,
@@ -15,6 +16,7 @@ export function useUniversitySearch() {
   const [analysesMap, setAnalysesMap] = useState<
     Map<string, UniversityAnalysis>
   >(new Map());
+  const [agentSteps, setAgentSteps] = useState<AgentExecutionStep[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -36,6 +38,7 @@ export function useUniversitySearch() {
       setAnalyzedCount(0);
       setTotalCount(0);
       setAnalysesMap(new Map());
+      setAgentSteps([]);
 
       const analysisBuffer = new Map<string, UniversityAnalysis>();
 
@@ -61,6 +64,10 @@ export function useUniversitySearch() {
               setAnalyzedCount((prev) => prev + 1);
               break;
 
+            case "agent_step":
+              setAgentSteps((current) => [...current, event.step]);
+              break;
+
             case "done":
               setRankings(event.rankings);
               setStatus("success");
@@ -73,9 +80,7 @@ export function useUniversitySearch() {
           }
         }
 
-        if (status === "streaming") {
-          setStatus("success");
-        }
+        setStatus((current) => (current === "streaming" ? "success" : current));
       } catch (err) {
         if (controller.signal.aborted) return;
         const message =
@@ -98,6 +103,7 @@ export function useUniversitySearch() {
     setAnalyzedCount(0);
     setTotalCount(0);
     setAnalysesMap(new Map());
+    setAgentSteps([]);
   }, []);
 
   return {
@@ -107,6 +113,7 @@ export function useUniversitySearch() {
     analyzedCount,
     totalCount,
     analysesMap,
+    agentSteps,
     search,
     reset,
   };

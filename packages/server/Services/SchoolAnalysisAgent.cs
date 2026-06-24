@@ -21,10 +21,12 @@ public sealed class SchoolAnalysisAgent
 {
     private readonly ChatClientAgent _agent;
     private readonly ILogger<SchoolAnalysisAgent> _logger;
+    private readonly AgentProgressContext _progressContext;
 
     public SchoolAnalysisAgent(
         SchoolServiceOptions options,
         LocalSkillScriptRunner skillScriptRunner,
+        AgentProgressContext progressContext,
         ILoggerFactory loggerFactory,
         ILogger<SchoolAnalysisAgent> logger)
     {
@@ -36,7 +38,7 @@ public sealed class SchoolAnalysisAgent
 
         // DashScopeResponseFixerHandler：在 OpenAI SDK 反序列化前，修正 DashScope 把
         // tool_call arguments 序列化为数组而非对象的格式问题。
-        var fixerHandler = new DashScopeResponseFixerHandler();
+        var fixerHandler = new DashScopeResponseFixerHandler(loggerFactory.CreateLogger<DashScopeResponseFixerHandler>());
         var httpClient = new HttpClient(fixerHandler)
         {
             Timeout = options.DashScopeNetworkTimeout + TimeSpan.FromSeconds(10),
@@ -55,13 +57,31 @@ public sealed class SchoolAnalysisAgent
         // AgentSkillsProvider 自动生成的 run_skill_script 不带 schema，部分模型无法可靠传参，故不使用。
         var searchWechatTool = AIFunctionFactory.Create(
             (string query, int? num, string? region, CancellationToken ct)
-                => skillScriptRunner.SearchWechatArticlesAsync(query, num, region, ct),
+                => InvokeToolAsync(
+                    "search",
+                    new Dictionary<string, object?>
+                    {
+                        ["query"] = query,
+                        ["num"] = num,
+                        ["region"] = region,
+                    },
+                    innerCt => skillScriptRunner.SearchWechatArticlesAsync(query, num, region, innerCt),
+                    ct),
             name: "search_wechat_articles",
             description: "搜索微信公众号文章。query 为必填关键词（学校名称），num 为返回条数（默认 10），region 为学校完整地址（工具自动提取市+区消歧）。返回含标题、链接、摘要、发布时间、来源公众号的 JSON。");
 
         var searchSchoolInfoTool = AIFunctionFactory.Create(
             (string school_name, string? aspect, string? region, CancellationToken ct)
-                => skillScriptRunner.SearchSchoolInfoAsync(school_name, aspect, region, ct),
+                => InvokeToolAsync(
+                    "search",
+                    new Dictionary<string, object?>
+                    {
+                        ["school_name"] = school_name,
+                        ["aspect"] = aspect,
+                        ["region"] = region,
+                    },
+                    innerCt => skillScriptRunner.SearchSchoolInfoAsync(school_name, aspect, region, innerCt),
+                    ct),
             name: "search_school_info",
             description: "学校信息专用联网搜索：自动清洗校名、追加维度关键词、过滤无关结果。\n- school_name（必填）：学校全名（带括号也可，工具会自动清洗）。\n- aspect（可选）：搜索维度，可选值：师资 / 评价 / 招生 / 活动 / 新闻；每次调用传一个维度，结果差异化更好。\n- region（可选）：学校完整地址（如 \"重庆市巴南区鱼轻路10号\"），工具自动提取市+区前缀消歧。\n返回 { matched_tokens, results:[{title,url,snippet}] }，无相关结果时返回 note 说明。");
 
@@ -75,7 +95,10 @@ public sealed class SchoolAnalysisAgent
             Tools = [searchWechatTool, searchSchoolInfoTool],
         };
 
-        _agent = new FunctionCallArgumentNormalizerChatClient(chatClient)
+        _agent = new FunctionCallArgumentNormalizerChatClient(
+                chatClient,
+                options,
+                loggerFactory.CreateLogger<FunctionCallArgumentNormalizerChatClient>())
             .AsAIAgent(
                 new ChatClientAgentOptions
                 {
@@ -85,6 +108,7 @@ public sealed class SchoolAnalysisAgent
                 },
                 loggerFactory: loggerFactory);
 
+            _progressContext = progressContext;
         _logger = logger;
     }
 
@@ -126,28 +150,106 @@ public sealed class SchoolAnalysisAgent
     /// 分析单所学校的公开舆情内容，返回结构化评分结果。
     /// Agent 自主决定调用哪些工具、何时完成调研，最终输出 JSON。
     /// </summary>
-    public async Task<SchoolAnalysis> AnalyzeAsync(School school, int? studentScore, CancellationToken cancellationToken)
+    public async Task<SchoolAnalysis> AnalyzeAsync(
+        School school,
+        int? studentScore,
+        IAgentProgressReporter? progressReporter,
+        CancellationToken cancellationToken)
     {
         var prompt = BuildPrompt(school, studentScore);
+        using var _ = _progressContext.Push(new AgentProgressScope("school-analysis", school.Id, school.Name, progressReporter));
 
         try
         {
+            await ReportAsync("running", "开始分析学校公开信息", cancellationToken: cancellationToken);
             var response = await _agent.RunAsync(prompt, cancellationToken: cancellationToken);
             var raw = response.Text;
+            await ReportAsync(
+                "completed",
+                "解析学校相关信息",
+                result: AgentProgressFormatter.Preview(raw),
+                cancellationToken: cancellationToken);
 
             _logger.LogInformation("Agent 分析原始返回: {SchoolName} => {RawResponse}", school.Name, raw);
 
             var json = ExtractJson(raw)
                 ?? throw new InvalidOperationException("Agent 未返回可解析的 JSON");
 
-            return JsonSerializer.Deserialize<SchoolAnalysis>(json, JsonOptions)
+            var result = JsonSerializer.Deserialize<SchoolAnalysis>(json, JsonOptions)
                 ?? CreateFallbackAnalysis();
+            await ReportAsync("completed", "学校分析完成", cancellationToken: cancellationToken);
+            return result;
         }
         catch (Exception ex)
         {
+            await ReportAsync("failed", $"学校分析失败: {ex.Message}", cancellationToken: CancellationToken.None);
             _logger.LogWarning(ex, "学校分析失败，使用保守兜底结果: {SchoolName}", school.Name);
             return CreateFallbackAnalysis();
         }
+    }
+
+    public Task<SchoolAnalysis> AnalyzeAsync(School school, int? studentScore, CancellationToken cancellationToken)
+        => AnalyzeAsync(school, studentScore, progressReporter: null, cancellationToken);
+
+    private async Task<string> InvokeToolAsync(
+        string toolName,
+        Dictionary<string, object?> arguments,
+        Func<CancellationToken, Task<string>> action,
+        CancellationToken cancellationToken)
+    {
+        await ReportAsync(
+            "running",
+            $"开始查找学校数据",
+            toolName,
+            null,
+            cancellationToken: cancellationToken);
+
+        try
+        {
+            var result = await action(cancellationToken);
+            await ReportAsync(
+                "completed",
+                $"学校数据查找完成",
+                toolName,
+                null,
+                AgentProgressFormatter.Preview(result),
+                cancellationToken);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await ReportAsync(
+                "failed",
+                $"学校数据执行失败",
+                toolName,
+                null,
+                AgentProgressFormatter.Preview(ex.Message),
+                CancellationToken.None);
+            throw;
+        }
+    }
+
+    private ValueTask ReportAsync(
+        string status,
+        string message,
+        string? toolName = null,
+        IReadOnlyDictionary<string, object?>? arguments = null,
+        string? result = null,
+        CancellationToken cancellationToken = default)
+    {
+        var scope = _progressContext.Current;
+        if (scope?.Reporter is null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return scope.Reporter.ReportAsync(
+            AgentProgressFormatter.CreateStep(scope, status, message, toolName, arguments, result),
+            cancellationToken);
     }
 
     // ─── 提示构建 ─────────────────────────────────────────────────────────────

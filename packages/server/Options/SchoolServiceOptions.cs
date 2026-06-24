@@ -7,6 +7,10 @@ public sealed record SchoolServiceOptions(
     string DashScopeApiKey,
     string DashScopeBaseUrl,
     TimeSpan DashScopeNetworkTimeout,
+    int DashScopeRateLimitMaxRetries,
+    TimeSpan DashScopeRateLimitBaseDelay,
+    TimeSpan DashScopeRateLimitMaxDelay,
+    TimeSpan DashScopeMinRequestInterval,
     bool DashScopeUseResponsesApi,
     string DashScopeModel,
     string NodeCommand,
@@ -27,13 +31,29 @@ public sealed record SchoolServiceOptions(
 {
     public static SchoolServiceOptions FromConfiguration(IConfiguration configuration)
     {
-        var timeoutSeconds = int.TryParse(configuration["SKILL_TIMEOUT_SECONDS"], out var value) ? value : 90;
+        var timeoutSeconds = int.TryParse(configuration["SKILL_TIMEOUT_SECONDS"], out var value) ? value : 60;
         var dashScopeNetworkTimeoutSeconds = int.TryParse(
             configuration["DASHSCOPE_NETWORK_TIMEOUT_SECONDS"] ?? configuration["OPENAI_NETWORK_TIMEOUT_SECONDS"],
             out var networkTimeoutSeconds)
             ? networkTimeoutSeconds
-            : 240;
-        var maxConcurrency = int.TryParse(configuration["ANALYSIS_MAX_CONCURRENCY"], out var concurrency) ? concurrency : 8;
+            : 180;
+        var dashScopeRateLimitMaxRetries = Math.Clamp(
+            int.TryParse(configuration["DASHSCOPE_RATE_LIMIT_MAX_RETRIES"], out var retryCount) ? retryCount : 4,
+            0,
+            10);
+        var dashScopeRateLimitBaseDelayMs = Math.Clamp(
+            int.TryParse(configuration["DASHSCOPE_RATE_LIMIT_BASE_DELAY_MS"], out var baseDelayMs) ? baseDelayMs : 2000,
+            200,
+            60000);
+        var dashScopeRateLimitMaxDelayMs = Math.Clamp(
+            int.TryParse(configuration["DASHSCOPE_RATE_LIMIT_MAX_DELAY_MS"], out var maxDelayMs) ? maxDelayMs : 15000,
+            dashScopeRateLimitBaseDelayMs,
+            120000);
+        var dashScopeMinRequestIntervalMs = Math.Clamp(
+            int.TryParse(configuration["DASHSCOPE_MIN_REQUEST_INTERVAL_MS"], out var minRequestIntervalMs) ? minRequestIntervalMs : 800,
+            0,
+            10000);
+        var maxConcurrency = int.TryParse(configuration["ANALYSIS_MAX_CONCURRENCY"], out var concurrency) ? concurrency : 5;
         var configuredBaseUrl = configuration["DASHSCOPE_BASE_URL"] ?? configuration["OPENAI_BASE_URL"];
         var apiStyle = configuration["DASHSCOPE_API_STYLE"] ?? configuration["OPENAI_API_STYLE"];
         var useResponsesApi = ShouldUseResponsesApi(configuredBaseUrl, apiStyle);
@@ -44,7 +64,11 @@ public sealed record SchoolServiceOptions(
             AmapSecurityKey: configuration["SK"] ?? string.Empty,
             DashScopeApiKey: configuration["DASHSCOPE_API_KEY"] ?? configuration["OPENAI_API_KEY"] ?? string.Empty,
             DashScopeBaseUrl: NormalizeOpenAiEndpoint(configuredBaseUrl) ?? "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            DashScopeNetworkTimeout: TimeSpan.FromSeconds(Math.Clamp(dashScopeNetworkTimeoutSeconds, 30, 900)),
+            DashScopeNetworkTimeout: TimeSpan.FromSeconds(Math.Clamp(dashScopeNetworkTimeoutSeconds, 30, 600)),
+            DashScopeRateLimitMaxRetries: dashScopeRateLimitMaxRetries,
+            DashScopeRateLimitBaseDelay: TimeSpan.FromMilliseconds(dashScopeRateLimitBaseDelayMs),
+            DashScopeRateLimitMaxDelay: TimeSpan.FromMilliseconds(dashScopeRateLimitMaxDelayMs),
+            DashScopeMinRequestInterval: TimeSpan.FromMilliseconds(dashScopeMinRequestIntervalMs),
             DashScopeUseResponsesApi: useResponsesApi,
             DashScopeModel: configuration["DASHSCOPE_MODEL"] ?? configuration["OPENAI_CHAT_MODEL_NAME"] ?? "qwen3.6-plus",
             NodeCommand: configuration["NODE_COMMAND"] ?? "node",

@@ -84,6 +84,20 @@ export interface SchoolRanking {
   analyzing?: boolean;
 }
 
+/** Agent 流式执行步骤 */
+export interface AgentExecutionStep {
+  id: string;
+  scope: string;
+  status: "running" | "completed" | "failed" | string;
+  message: string;
+  timestamp: string;
+  entityId?: string | null;
+  entityName?: string | null;
+  toolName?: string | null;
+  toolArguments?: Record<string, unknown> | null;
+  toolResult?: string | null;
+}
+
 /** 高中录取分数线 */
 export interface AdmissionCutoffScore {
   year: number;
@@ -314,6 +328,7 @@ export type UniversitySearchStatus =
 export interface HighSchoolRecommendRequest {
   studentScore: number;
   province: string;
+  city?: string;
 }
 
 /** 高中单年录取分数线 */

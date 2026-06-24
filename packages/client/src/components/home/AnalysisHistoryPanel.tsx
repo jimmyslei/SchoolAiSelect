@@ -98,7 +98,7 @@ const HISTORY_META: Record<
 };
 
 function formatTime(ts: string) {
-  const d = new Date(ts);
+  const d = new Date(ts.substring(0, 19));
   const now = new Date();
   const diffMs = now.getTime() - d.getTime();
   const diffMin = Math.floor(diffMs / 60_000);

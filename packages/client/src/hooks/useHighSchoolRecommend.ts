@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type {
+  AgentExecutionStep,
   HighSchoolRecommendation,
   HighSchoolRecommendStatus,
 } from "@/types/school";
@@ -13,6 +14,7 @@ export function useHighSchoolRecommend() {
   const [error, setError] = useState<string | null>(null);
   const [province, setProvince] = useState("");
   const [studentScore, setStudentScore] = useState(0);
+  const [agentSteps, setAgentSteps] = useState<AgentExecutionStep[]>([]);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -22,6 +24,7 @@ export function useHighSchoolRecommend() {
       selectedProvince: string,
       token?: string,
       onAuthError?: () => void,
+      selectedCity?: string,
     ) => {
       abortRef.current?.abort();
       const controller = new AbortController();
@@ -32,16 +35,25 @@ export function useHighSchoolRecommend() {
       setRecommendations([]);
       setProvince(selectedProvince);
       setStudentScore(score);
+      setAgentSteps([]);
 
       try {
         for await (const event of recommendHighSchoolsStream(
-          { studentScore: score, province: selectedProvince },
+          {
+            studentScore: score,
+            province: selectedProvince,
+            city: selectedCity,
+          },
           controller.signal,
           token,
         )) {
           switch (event.type) {
             case "meta":
               setStatus("streaming");
+              break;
+
+            case "agent_step":
+              setAgentSteps((current) => [...current, event.step]);
               break;
 
             case "done":
@@ -59,9 +71,7 @@ export function useHighSchoolRecommend() {
           }
         }
 
-        if (status === "streaming") {
-          setStatus("success");
-        }
+        setStatus((current) => (current === "streaming" ? "success" : current));
       } catch (err) {
         if (controller.signal.aborted) return;
         const message =
@@ -83,6 +93,7 @@ export function useHighSchoolRecommend() {
     setError(null);
     setProvince("");
     setStudentScore(0);
+    setAgentSteps([]);
   }, []);
 
   return {
@@ -91,6 +102,7 @@ export function useHighSchoolRecommend() {
     error,
     province,
     studentScore,
+    agentSteps,
     search,
     reset,
   };

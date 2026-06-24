@@ -1,4 +1,5 @@
 import type {
+  AgentExecutionStep,
   AuthPayload,
   GeoLocation,
   HighSchoolRecommendation,
@@ -189,45 +190,12 @@ export type SearchStreamEvent =
       overallScore: number;
       admissionMatchScore?: number;
     }
+  | { type: "agent_step"; step: AgentExecutionStep }
   | { type: "done"; rankings: SchoolRanking[]; message?: string }
   | { type: "error"; message: string };
 
-export async function* searchSchoolsStream(
-  request: SearchRequest,
-  signal?: AbortSignal,
-  token?: string,
-): AsyncGenerator<SearchStreamEvent, void, unknown> {
-  const res = await fetch(`${API_BASE}/schools/search`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "text/event-stream",
-      ...authHeaders(token),
-    },
-    body: JSON.stringify(request),
-    signal,
-  });
-
-  if (!res.ok) {
-    let message = `搜索失败: ${res.statusText}`;
-    try {
-      const json = await res.json();
-      if (json?.message) message = json.message;
-    } catch {
-      // ignore parse error
-    }
-    throw new Error(message);
-  }
-
-  if (!res.body) {
-    throw new Error("浏览器不支持流式响应");
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  const parseFrame = (frame: string): SearchStreamEvent | null => {
+function createSseFrameParser<TEvent>() {
+  return (frame: string): TEvent | null => {
     let eventName = "message";
     const dataLines: string[] = [];
     for (const rawLine of frame.split("\n")) {
@@ -243,12 +211,25 @@ export async function* searchSchoolsStream(
     if (dataLines.length === 0) return null;
     try {
       const data = JSON.parse(dataLines.join("\n"));
-      return { type: eventName, ...data } as SearchStreamEvent;
+      return { type: eventName, ...data } as TEvent;
     } catch (e) {
       console.warn("[SSE] 跳过无法解析的帧:", e, dataLines.join("\n"));
       return null;
     }
   };
+}
+
+async function* readSseStream<TEvent>(
+  res: Response,
+): AsyncGenerator<TEvent, void, unknown> {
+  if (!res.body) {
+    throw new Error("浏览器不支持流式响应");
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  const parseFrame = createSseFrameParser<TEvent>();
 
   try {
     while (true) {
@@ -286,6 +267,38 @@ export async function* searchSchoolsStream(
     } catch {
       // ignore
     }
+  }
+}
+
+export async function* searchSchoolsStream(
+  request: SearchRequest,
+  signal?: AbortSignal,
+  token?: string,
+): AsyncGenerator<SearchStreamEvent, void, unknown> {
+  const res = await fetch(`${API_BASE}/schools/search`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
+      ...authHeaders(token),
+    },
+    body: JSON.stringify(request),
+    signal,
+  });
+
+  if (!res.ok) {
+    let message = `搜索失败: ${res.statusText}`;
+    try {
+      const json = await res.json();
+      if (json?.message) message = json.message;
+    } catch {
+      // ignore parse error
+    }
+    throw new Error(message);
+  }
+
+  for await (const event of readSseStream<SearchStreamEvent>(res)) {
+    yield event;
   }
 }
 
@@ -413,6 +426,7 @@ export type UniversitySearchStreamEvent =
       universityName: string;
       analysis: UniversityAnalysis;
     }
+  | { type: "agent_step"; step: AgentExecutionStep }
   | { type: "done"; rankings: UniversityRanking[]; message?: string }
   | { type: "error"; message: string };
 
@@ -443,73 +457,8 @@ export async function* searchUniversitiesStream(
     throw new Error(message);
   }
 
-  if (!res.body) {
-    throw new Error("浏览器不支持流式响应");
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  const parseFrame = (frame: string): UniversitySearchStreamEvent | null => {
-    let eventName = "message";
-    const dataLines: string[] = [];
-    for (const rawLine of frame.split("\n")) {
-      const line = rawLine.replace(/\r$/, "");
-      if (!line || line.startsWith(":")) continue;
-      const idx = line.indexOf(":");
-      const field = idx === -1 ? line : line.slice(0, idx);
-      let value = idx === -1 ? "" : line.slice(idx + 1);
-      if (value.startsWith(" ")) value = value.slice(1);
-      if (field === "event") eventName = value;
-      else if (field === "data") dataLines.push(value);
-    }
-    if (dataLines.length === 0) return null;
-    try {
-      const data = JSON.parse(dataLines.join("\n"));
-      return { type: eventName, ...data } as UniversitySearchStreamEvent;
-    } catch (e) {
-      console.warn("[SSE] 跳过无法解析的帧:", e, dataLines.join("\n"));
-      return null;
-    }
-  };
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let sepIndex: number;
-      while (
-        (sepIndex = (() => {
-          const a = buffer.indexOf("\n\n");
-          const b = buffer.indexOf("\r\n\r\n");
-          if (a === -1) return b;
-          if (b === -1) return a;
-          return Math.min(a, b);
-        })()) >= 0
-      ) {
-        const sepLen = buffer.startsWith("\r\n\r\n", sepIndex) ? 4 : 2;
-        const frame = buffer.slice(0, sepIndex);
-        buffer = buffer.slice(sepIndex + sepLen);
-        const event = parseFrame(frame);
-        if (event) yield event;
-      }
-    }
-
-    buffer += decoder.decode();
-    const tail = buffer.trim();
-    if (tail) {
-      const event = parseFrame(tail);
-      if (event) yield event;
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // ignore
-    }
+  for await (const event of readSseStream<UniversitySearchStreamEvent>(res)) {
+    yield event;
   }
 }
 
@@ -523,6 +472,7 @@ export type HighSchoolRecommendStreamEvent =
       studentScore: number;
       province: string;
     }
+  | { type: "agent_step"; step: AgentExecutionStep }
   | {
       type: "done";
       recommendations: HighSchoolRecommendation[];
@@ -557,73 +507,10 @@ export async function* recommendHighSchoolsStream(
     throw new Error(message);
   }
 
-  if (!res.body) {
-    throw new Error("浏览器不支持流式响应");
-  }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-
-  const parseFrame = (frame: string): HighSchoolRecommendStreamEvent | null => {
-    let eventName = "message";
-    const dataLines: string[] = [];
-    for (const rawLine of frame.split("\n")) {
-      const line = rawLine.replace(/\r$/, "");
-      if (!line || line.startsWith(":")) continue;
-      const idx = line.indexOf(":");
-      const field = idx === -1 ? line : line.slice(0, idx);
-      let value = idx === -1 ? "" : line.slice(idx + 1);
-      if (value.startsWith(" ")) value = value.slice(1);
-      if (field === "event") eventName = value;
-      else if (field === "data") dataLines.push(value);
-    }
-    if (dataLines.length === 0) return null;
-    try {
-      const data = JSON.parse(dataLines.join("\n"));
-      return { type: eventName, ...data } as HighSchoolRecommendStreamEvent;
-    } catch (e) {
-      console.warn("[SSE] 跳过无法解析的帧:", e, dataLines.join("\n"));
-      return null;
-    }
-  };
-
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      let sepIndex: number;
-      while (
-        (sepIndex = (() => {
-          const a = buffer.indexOf("\n\n");
-          const b = buffer.indexOf("\r\n\r\n");
-          if (a === -1) return b;
-          if (b === -1) return a;
-          return Math.min(a, b);
-        })()) >= 0
-      ) {
-        const sepLen = buffer.startsWith("\r\n\r\n", sepIndex) ? 4 : 2;
-        const frame = buffer.slice(0, sepIndex);
-        buffer = buffer.slice(sepIndex + sepLen);
-        const event = parseFrame(frame);
-        if (event) yield event;
-      }
-    }
-
-    buffer += decoder.decode();
-    const tail = buffer.trim();
-    if (tail) {
-      const event = parseFrame(tail);
-      if (event) yield event;
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // ignore
-    }
+  for await (const event of readSseStream<HighSchoolRecommendStreamEvent>(
+    res,
+  )) {
+    yield event;
   }
 }
 

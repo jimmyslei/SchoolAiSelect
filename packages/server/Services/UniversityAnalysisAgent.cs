@@ -19,17 +19,19 @@ public sealed class UniversityAnalysisAgent
 {
     private readonly ChatClientAgent _agent;
     private readonly ILogger<UniversityAnalysisAgent> _logger;
+    private readonly AgentProgressContext _progressContext;
 
     public UniversityAnalysisAgent(
         SchoolServiceOptions options,
         LocalSkillScriptRunner skillScriptRunner,
+        AgentProgressContext progressContext,
         ILoggerFactory loggerFactory,
         ILogger<UniversityAnalysisAgent> logger)
     {
         if (string.IsNullOrWhiteSpace(options.DashScopeApiKey))
             throw new InvalidOperationException("未配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY，无法初始化大学分析 Agent");
 
-        var fixerHandler = new DashScopeResponseFixerHandler();
+        var fixerHandler = new DashScopeResponseFixerHandler(loggerFactory.CreateLogger<DashScopeResponseFixerHandler>());
         var httpClient = new HttpClient(fixerHandler)
         {
             Timeout = options.DashScopeNetworkTimeout + TimeSpan.FromSeconds(10),
@@ -47,7 +49,16 @@ public sealed class UniversityAnalysisAgent
         // 注册联网搜索工具
         var searchSchoolInfoTool = AIFunctionFactory.Create(
             (string school_name, string? aspect, string? region, CancellationToken ct)
-                => skillScriptRunner.SearchSchoolInfoAsync(school_name, aspect, region, ct),
+                => InvokeToolAsync(
+                    "search",
+                    new Dictionary<string, object?>
+                    {
+                        ["school_name"] = school_name,
+                        ["aspect"] = aspect,
+                        ["region"] = region,
+                    },
+                    innerCt => skillScriptRunner.SearchSchoolInfoAsync(school_name, aspect, region, innerCt),
+                    ct),
             name: "search_school_info",
             description: "学校信息专用联网搜索：自动清洗校名、追加维度关键词、过滤无关结果。\n" +
                 "- school_name（必填）：学校全名。\n" +
@@ -57,7 +68,15 @@ public sealed class UniversityAnalysisAgent
 
         var searchWebTool = AIFunctionFactory.Create(
             (string query, int? num, CancellationToken ct)
-                => skillScriptRunner.SearchSchoolInfoAsync(query, null, null, ct),
+                => InvokeToolAsync(
+                    "search",
+                    new Dictionary<string, object?>
+                    {
+                        ["query"] = query,
+                        ["num"] = num,
+                    },
+                    innerCt => skillScriptRunner.SearchSchoolInfoAsync(query, null, null, innerCt),
+                    ct),
             name: "search_web",
             description: "通用联网搜索工具。query 为搜索关键词，返回搜索结果列表。适用于搜索录取分数线、专业排名、就业数据等。");
 
@@ -69,7 +88,10 @@ public sealed class UniversityAnalysisAgent
             Tools = [searchSchoolInfoTool, searchWebTool],
         };
 
-        _agent = new FunctionCallArgumentNormalizerChatClient(chatClient)
+        _agent = new FunctionCallArgumentNormalizerChatClient(
+                chatClient,
+                options,
+                loggerFactory.CreateLogger<FunctionCallArgumentNormalizerChatClient>())
             .AsAIAgent(
                 new ChatClientAgentOptions
                 {
@@ -79,6 +101,7 @@ public sealed class UniversityAnalysisAgent
                 },
                 loggerFactory: loggerFactory);
 
+            _progressContext = progressContext;
         _logger = logger;
     }
 
@@ -115,6 +138,7 @@ public sealed class UniversityAnalysisAgent
         string universityName,
         int studentScore,
         IReadOnlyList<string>? preferredMajors,
+        IAgentProgressReporter? progressReporter,
         CancellationToken cancellationToken)
     {
         var majorsText = preferredMajors is { Count: > 0 }
@@ -176,18 +200,92 @@ public sealed class UniversityAnalysisAgent
 - summary：300 字以内的综合评价
 """;
 
+        using var _ = _progressContext.Push(new AgentProgressScope("university-analysis", null, universityName, progressReporter));
+
         try
         {
+            await ReportAsync("running", "开始分析大学信息", cancellationToken: cancellationToken);
             var response = await _agent.RunAsync(prompt, cancellationToken: cancellationToken);
             var text = response.Text ?? string.Empty;
-            _logger.LogDebug("大学分析 Agent 原始输出: {Text}", text);
-            return ParseAnalysisResult(text, universityName);
+            await ReportAsync(
+                "completed",
+                "开始解析大学分析结果",
+                result: AgentProgressFormatter.Preview(text),
+                cancellationToken: cancellationToken);
+            // _logger.LogDebug("大学分析 Agent 原始输出: {Text}", text);
+            var result = ParseAnalysisResult(text, universityName);
+            await ReportAsync("completed", "大学分析完成", cancellationToken: cancellationToken);
+            return result;
         }
         catch (Exception ex)
         {
+            await ReportAsync("failed", $"大学分析失败: {ex.Message}", cancellationToken: CancellationToken.None);
             _logger.LogError(ex, "大学分析失败: {University}", universityName);
             return CreateFallbackAnalysis(universityName);
         }
+    }
+
+    public Task<UniversityAnalysis> AnalyzeUniversityAsync(
+        string universityName,
+        int studentScore,
+        IReadOnlyList<string>? preferredMajors,
+        CancellationToken cancellationToken)
+        => AnalyzeUniversityAsync(universityName, studentScore, preferredMajors, progressReporter: null, cancellationToken);
+
+    private async Task<string> InvokeToolAsync(
+        string toolName,
+        Dictionary<string, object?> arguments,
+        Func<CancellationToken, Task<string>> action,
+        CancellationToken cancellationToken)
+    {
+        await ReportAsync("running", $"开始查找大学数据", toolName, null, cancellationToken: cancellationToken);
+
+        try
+        {
+            var result = await action(cancellationToken);
+            await ReportAsync(
+                "completed",
+                $"大学数据执行完成",
+                toolName,
+                null,
+                AgentProgressFormatter.Preview(result),
+                cancellationToken);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await ReportAsync(
+                "failed",
+                $" {toolName} 执行失败: {ex.Message}",
+                toolName,
+                null,
+                AgentProgressFormatter.Preview(ex.Message),
+                CancellationToken.None);
+            throw;
+        }
+    }
+
+    private ValueTask ReportAsync(
+        string status,
+        string message,
+        string? toolName = null,
+        IReadOnlyDictionary<string, object?>? arguments = null,
+        string? result = null,
+        CancellationToken cancellationToken = default)
+    {
+        var scope = _progressContext.Current;
+        if (scope?.Reporter is null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return scope.Reporter.ReportAsync(
+            AgentProgressFormatter.CreateStep(scope, status, message, toolName, arguments, result),
+            cancellationToken);
     }
 
     private UniversityAnalysis ParseAnalysisResult(string rawText, string universityName)

@@ -334,13 +334,13 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
     {
         if (string.IsNullOrWhiteSpace(url))
         {
-            return "Error: url 不能为空";
+            return BuildSkippedFetchResult(url, "empty-url");
         }
 
         if (!Uri.TryCreate(url, UriKind.Absolute, out var uri)
             || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps))
         {
-            return "Error: url 必须是合法的 http/https 链接";
+            return BuildSkippedFetchResult(url, "invalid-url");
         }
 
         try
@@ -367,7 +367,10 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
             logger.LogInformation("Explicit tool invoked. Tool: fetch_webpage_content, Url: {Url}", url);
             WriteSkillDebugLog("EXPLICIT_TOOL_INVOKED", $"Tool=fetch_webpage_content; Url={url}");
 
-            using var response = await httpClient.GetAsync(uri, requestTimeoutCts.Token).ConfigureAwait(false);
+            using var response = await httpClient.GetAsync(
+                uri,
+                HttpCompletionOption.ResponseHeadersRead,
+                requestTimeoutCts.Token).ConfigureAwait(false);
             var mediaType = response.Content.Headers.ContentType?.MediaType;
             var rawContent = await response.Content.ReadAsStringAsync(requestTimeoutCts.Token).ConfigureAwait(false);
 
@@ -399,6 +402,11 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         {
             logger.LogInformation("Fetch webpage content timed out and was skipped: {Url}", url);
             return BuildSkippedFetchResult(url, "timeout");
+        }
+        catch (HttpRequestException ex)
+        {
+            logger.LogInformation(ex, "Fetch webpage content request failed and was skipped: {Url}", url);
+            return BuildSkippedFetchResult(url, "request-failed");
         }
         catch (Exception ex)
         {
@@ -478,12 +486,12 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         var scriptName = Path.Combine("scripts", "anysearch_cli.js");
         var scriptFullPath = Path.Combine(options.SkillRootPath, "anysearch-skill", scriptName);
 
-        // logger.LogInformation(
-        //     "Explicit tool invoked. Tool: search_any, Query: {Query}, Domain: {Domain}, SubDomain: {SubDomain}",
-        //     query, domain, subDomain);
-        // WriteSkillDebugLog(
-        //     "EXPLICIT_TOOL_INVOKED",
-        //     $"Tool=search_any; Script={scriptName}; Query={query}; Domain={domain}; SubDomain={subDomain}");
+        logger.LogInformation(
+            "Explicit tool invoked. Tool: search_any, Query: {Query}, Domain: {Domain}, SubDomain: {SubDomain}",
+            query, domain, subDomain);
+        WriteSkillDebugLog(
+            "EXPLICIT_TOOL_INVOKED",
+            $"Tool=search_any; Script={scriptName}; Query={query}; Domain={domain}; SubDomain={subDomain}");
 
         var result = await ExecuteScriptAsync(
             "anysearch-skill",
@@ -558,12 +566,12 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         var scriptName = Path.Combine("scripts", "anysearch_cli.js");
         var scriptFullPath = Path.Combine(options.SkillRootPath, "anysearch-skill", scriptName);
 
-        // logger.LogInformation(
-        //     "Explicit tool invoked. Tool: batch_search_any, Queries: {Queries}, Domain: {Domain}",
-        //     JsonSerializer.Serialize(normalizedQueries), domain);
-        // WriteSkillDebugLog(
-        //     "EXPLICIT_TOOL_INVOKED",
-        //     $"Tool=batch_search_any; Script={scriptName}; Domain={domain}; SubDomain={subDomain}; Queries={JsonSerializer.Serialize(normalizedQueries)}");
+        logger.LogInformation(
+            "Explicit tool invoked. Tool: batch_search_any, Queries: {Queries}, Domain: {Domain}",
+            JsonSerializer.Serialize(normalizedQueries), domain);
+        WriteSkillDebugLog(
+            "EXPLICIT_TOOL_INVOKED",
+            $"Tool=batch_search_any; Script={scriptName}; Domain={domain}; SubDomain={subDomain}; Queries={JsonSerializer.Serialize(normalizedQueries)}");
 
         var result = await ExecuteScriptAsync(
             "anysearch-skill",
@@ -617,9 +625,9 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         var scriptFullPath = Path.Combine(options.SkillRootPath, "anysearch-skill", scriptName);
 
         logger.LogInformation("Explicit tool invoked. Tool: extract_webpage_any, Url: {Url}", url);
-        // WriteSkillDebugLog(
-        //     "EXPLICIT_TOOL_INVOKED",
-        //     $"Tool=extract_webpage_any; Script={scriptName}; Url={url}");
+        WriteSkillDebugLog(
+            "EXPLICIT_TOOL_INVOKED",
+            $"Tool=extract_webpage_any; Script={scriptName}; Url={url}");
 
         var result = await ExecuteScriptAsync(
             "anysearch-skill",
@@ -653,9 +661,9 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         logger.LogInformation(
             "Explicit tool invoked. Tool: get_sub_domains_any, Domains: {Domains}",
             string.Join(", ", domains));
-        // WriteSkillDebugLog(
-        //     "EXPLICIT_TOOL_INVOKED",
-        //     $"Tool=get_sub_domains_any; Script={scriptName}; Domains={string.Join(",", domains)}");
+        WriteSkillDebugLog(
+            "EXPLICIT_TOOL_INVOKED",
+            $"Tool=get_sub_domains_any; Script={scriptName}; Domains={string.Join(",", domains)}");
 
         var result = await ExecuteScriptAsync(
             "anysearch-skill",
@@ -1308,13 +1316,13 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         string? subCommand,
         CancellationToken cancellationToken)
     {
-        // logger.LogInformation(
-        //     "Executing skill script. Skill: {SkillName}, Script: {ScriptName}, SubCommand: {SubCommand}, Path: {ScriptPath}, Arguments: {Arguments}",
-        //     skillName,
-        //     scriptName,
-        //     subCommand,
-        //     scriptFullPath,
-        //     SerializeArguments(arguments));
+        logger.LogInformation(
+            "Executing skill script. Skill: {SkillName}, Script: {ScriptName}, SubCommand: {SubCommand}, Path: {ScriptPath}, Arguments: {Arguments}",
+            skillName,
+            scriptName,
+            subCommand,
+            scriptFullPath,
+            SerializeArguments(arguments));
         if (!File.Exists(scriptFullPath))
         {
             WriteSkillDebugLog(
@@ -1330,9 +1338,9 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
                 : BuildProcessStartInfo(scriptName, scriptFullPath, arguments);
             var renderedCommand = RenderCommand(startInfo);
 
-            // WriteSkillDebugLog(
-            //     "SCRIPT_EXECUTING",
-            //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; Path={scriptFullPath}; WorkingDirectory={startInfo.WorkingDirectory}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}");
+            WriteSkillDebugLog(
+                "SCRIPT_EXECUTING",
+                $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; Path={scriptFullPath}; WorkingDirectory={startInfo.WorkingDirectory}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}");
 
             using var process = new Process { StartInfo = startInfo };
 
@@ -1347,9 +1355,9 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
             if (completedTask == timeoutTask)
             {
                 TryKill(process);
-                // WriteSkillDebugLog(
-                //     "SCRIPT_TIMEOUT",
-                //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; Command={renderedCommand}; TimeoutSeconds={options.SkillTimeout.TotalSeconds:0}; Arguments={SerializeArguments(arguments)}");
+                WriteSkillDebugLog(
+                    "SCRIPT_TIMEOUT",
+                    $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; Command={renderedCommand}; TimeoutSeconds={options.SkillTimeout.TotalSeconds:0}; Arguments={SerializeArguments(arguments)}");
                 return $"Error: Script '{scriptName}' timed out after {options.SkillTimeout.TotalSeconds:0} seconds.";
             }
 
@@ -1364,9 +1372,9 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
                     scriptName,
                     stdErr);
 
-                // WriteSkillDebugLog(
-                //     "SCRIPT_FAILED",
-                //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; ExitCode={process.ExitCode}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}; StdOut={TruncateForDebugLog(stdOut)}; StdErr={TruncateForDebugLog(stdErr)}");
+                WriteSkillDebugLog(
+                    "SCRIPT_FAILED",
+                    $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; ExitCode={process.ExitCode}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}; StdOut={TruncateForDebugLog(stdOut)}; StdErr={TruncateForDebugLog(stdErr)}");
 
                 return string.IsNullOrWhiteSpace(stdErr)
                     ? $"Error: Script '{scriptName}' exited with code {process.ExitCode}."
@@ -1376,16 +1384,16 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
             var output = string.IsNullOrWhiteSpace(stdOut) ? stdErr : stdOut;
             var normalizedOutput = string.IsNullOrWhiteSpace(output) ? "(no output)" : output.Trim();
 
-            // logger.LogInformation(
-            //     "Skill script completed. Skill: {SkillName}, Script: {ScriptName}, Arguments: {Arguments}, Result: {Result}",
-            //     skillName,
-            //     scriptName,
-            //     SerializeArguments(arguments),
-            //     TruncateForLog(normalizedOutput));
+            logger.LogInformation(
+                "Skill script completed. Skill: {SkillName}, Script: {ScriptName}, Arguments: {Arguments}, Result: {Result}",
+                skillName,
+                scriptName,
+                SerializeArguments(arguments),
+                TruncateForLog(normalizedOutput));
 
-            // WriteSkillDebugLog(
-            //     "SCRIPT_COMPLETED",
-            //     $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; ExitCode={process.ExitCode}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}; StdOut={TruncateForDebugLog(stdOut)}; StdErr={TruncateForDebugLog(stdErr)}; Result={TruncateForDebugLog(normalizedOutput)}");
+            WriteSkillDebugLog(
+                "SCRIPT_COMPLETED",
+                $"Skill={skillName}; Script={scriptName}; SubCommand={subCommand}; ExitCode={process.ExitCode}; Command={renderedCommand}; Arguments={SerializeArguments(arguments)}; StdOut={TruncateForDebugLog(stdOut)}; StdErr={TruncateForDebugLog(stdErr)}; Result={TruncateForDebugLog(normalizedOutput)}");
 
             return normalizedOutput;
         }
@@ -1396,9 +1404,9 @@ public sealed class LocalSkillScriptRunner(SchoolServiceOptions options, ILogger
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Skill script execution failed. Skill: {SkillName}, Script: {ScriptName}", skillName, scriptName);
-            // WriteSkillDebugLog(
-            //     "SCRIPT_EXCEPTION",
-            //     $"Skill={skillName}; Script={scriptName}; Path={scriptFullPath}; Arguments={SerializeArguments(arguments)}; Exception={exception}");
+            WriteSkillDebugLog(
+                "SCRIPT_EXCEPTION",
+                $"Skill={skillName}; Script={scriptName}; Path={scriptFullPath}; Arguments={SerializeArguments(arguments)}; Exception={exception}");
             return $"Error: Failed to execute script '{scriptName}': {exception.Message}";
         }
     }

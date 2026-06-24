@@ -22,17 +22,19 @@ public sealed class HighSchoolRecommendAgent
 {
     private readonly ChatClientAgent _agent;
     private readonly ILogger<HighSchoolRecommendAgent> _logger;
+    private readonly AgentProgressContext _progressContext;
 
     public HighSchoolRecommendAgent(
         SchoolServiceOptions options,
         LocalSkillScriptRunner skillScriptRunner,
+        AgentProgressContext progressContext,
         ILoggerFactory loggerFactory,
         ILogger<HighSchoolRecommendAgent> logger)
     {
         if (string.IsNullOrWhiteSpace(options.DashScopeApiKey))
             throw new InvalidOperationException("未配置 DASHSCOPE_API_KEY 或 OPENAI_API_KEY，无法初始化高中择校推荐 Agent");
 
-        var fixerHandler = new DashScopeResponseFixerHandler();
+        var fixerHandler = new DashScopeResponseFixerHandler(loggerFactory.CreateLogger<DashScopeResponseFixerHandler>());
         var httpClient = new HttpClient(fixerHandler)
         {
             Timeout = options.DashScopeNetworkTimeout + TimeSpan.FromSeconds(10),
@@ -96,7 +98,17 @@ public sealed class HighSchoolRecommendAgent
 
         var batchSearchAnyTool = AIFunctionFactory.Create(
             (AnySearchBatchQuery[] queries, string? domain, string? subDomain, string? subDomainParams, CancellationToken ct)
-                => skillScriptRunner.BatchSearchAnyAsync(queries, domain, subDomain, subDomainParams, ct),
+                => InvokeToolAsync(
+                    "search",
+                    new Dictionary<string, object?>
+                    {
+                        ["queries"] = queries,
+                        ["domain"] = domain,
+                        ["subDomain"] = subDomain,
+                        ["subDomainParams"] = subDomainParams,
+                    },
+                    innerCt => skillScriptRunner.BatchSearchAnyAsync(queries, domain, subDomain, subDomainParams, innerCt),
+                    ct),
             name: "batch_search_any",
             description: "AnySearch 批量搜索工具，支持多查询并行执行和混合领域搜索。\n" +
                 "- queries（必填）：对象数组，例如 [{\"query\":\"重庆南开中学\",\"max_results\":5},{\"query\":\"重庆鱼洞云水苑幼儿园\",\"max_results\":5}]。\n" +
@@ -113,7 +125,14 @@ public sealed class HighSchoolRecommendAgent
 
         var fetchWebpageContentTool = AIFunctionFactory.Create(
             (string url, CancellationToken ct)
-                => skillScriptRunner.FetchWebpageContentAsync(url, ct),
+                => InvokeToolAsync(
+                    "read",
+                    new Dictionary<string, object?>
+                    {
+                        ["url"] = url,
+                    },
+                    innerCt => skillScriptRunner.FetchWebpageContentAsync(url, innerCt),
+                    ct),
             name: "fetch_webpage_content",
             description: "读取公开网页正文内容。传入 batch_search_any 返回结果中的 url，返回 { url, title, content, contentLength, admissionScoreHints }，用于从页面正文提取录取分数线、招生说明等细节。只支持公开 http/https 页面。");
 
@@ -130,7 +149,10 @@ public sealed class HighSchoolRecommendAgent
             ],
         };
 
-        _agent = new FunctionCallArgumentNormalizerChatClient(chatClient)
+        _agent = new FunctionCallArgumentNormalizerChatClient(
+                chatClient,
+                options,
+                loggerFactory.CreateLogger<FunctionCallArgumentNormalizerChatClient>())
             .AsAIAgent(
                 new ChatClientAgentOptions
                 {
@@ -140,6 +162,7 @@ public sealed class HighSchoolRecommendAgent
                 },
                 loggerFactory: loggerFactory);
 
+            _progressContext = progressContext;
         _logger = logger;
     }
 
@@ -175,52 +198,144 @@ public sealed class HighSchoolRecommendAgent
     public async Task<IReadOnlyList<HighSchoolRecommendation>> RecommendAsync(
         int studentScore,
         string province,
-        CancellationToken cancellationToken)
+        IAgentProgressReporter? progressReporter,
+        CancellationToken cancellationToken,
+        string? city = null)
     {
-        var prompt = BuildPrompt(studentScore, province);
+        var prompt = BuildPrompt(studentScore, province, city);
+        using var _ = _progressContext.Push(new AgentProgressScope("highschool-analysis", null, province, progressReporter));
 
         try
         {
+            await ReportAsync("running", "开始分析高中录取数据", cancellationToken: cancellationToken);
             var response = await _agent.RunAsync(prompt, cancellationToken: cancellationToken);
             var text = response.Text ?? string.Empty;
+            await ReportAsync(
+                "completed",
+                "开始解析推荐结果",
+                result: AgentProgressFormatter.Preview(text),
+                cancellationToken: cancellationToken);
             // _logger.LogDebug("高中择校推荐 Agent 原始输出: {Text}", text);
-            return ParseRecommendations(text, province);
+            var result = ParseRecommendations(text, province);
+            await ReportAsync("completed", "高中择校推荐分析完成", cancellationToken: cancellationToken);
+            return result;
         }
         catch (Exception ex)
         {
+            await ReportAsync("failed", $"高中择校推荐分析失败: {ex.Message}", cancellationToken: CancellationToken.None);
             _logger.LogError(ex, "高中择校推荐分析失败: Province={Province}, Score={Score}", province, studentScore);
             return Array.Empty<HighSchoolRecommendation>();
         }
     }
 
+    public Task<IReadOnlyList<HighSchoolRecommendation>> RecommendAsync(
+        int studentScore,
+        string province,
+        CancellationToken cancellationToken,
+        string? city = null)
+        => RecommendAsync(studentScore, province, progressReporter: null, cancellationToken, city);
 
-    private static string BuildPrompt(int studentScore, string province)
+    private async Task<string> InvokeToolAsync(
+        string toolName,
+        Dictionary<string, object?> arguments,
+        Func<CancellationToken, Task<string>> action,
+        CancellationToken cancellationToken)
     {
+        await ReportAsync("running", $"{(toolName=="search"?"开始查找相关数据":"开始读取相关数据")}", toolName, null, cancellationToken: cancellationToken);
+
+        try
+        {
+            var result = await action(cancellationToken);
+            await ReportAsync(
+                "completed",
+                $" {(toolName=="search"?"学校数据查找完成":"学校数据读取完成")}",
+                toolName,
+                null,
+                AgentProgressFormatter.Preview(result),
+                cancellationToken);
+            return result;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            await ReportAsync(
+                "failed",
+                $" 数据执行失败: {ex.Message}",
+                toolName,
+                null,
+                AgentProgressFormatter.Preview(ex.Message),
+                CancellationToken.None);
+            throw;
+        }
+    }
+
+    private ValueTask ReportAsync(
+        string status,
+        string message,
+        string? toolName = null,
+        IReadOnlyDictionary<string, object?>? arguments = null,
+        string? result = null,
+        CancellationToken cancellationToken = default)
+    {
+        var scope = _progressContext.Current;
+        if (scope?.Reporter is null)
+        {
+            return ValueTask.CompletedTask;
+        }
+
+        return scope.Reporter.ReportAsync(
+            AgentProgressFormatter.CreateStep(scope, status, message, toolName, arguments, result),
+            cancellationToken);
+    }
+
+
+    private static string BuildPrompt(int studentScore, string province, string? city = null)
+    {
+        var isDirectControlledMunicipality = province is "北京市" or "天津市" or "上海市" or "重庆市";
+        var locationHint = !string.IsNullOrWhiteSpace(city)
+            ? isDirectControlledMunicipality
+                ? $"\n- 所在区/县：{city}（优先搜索该区/县范围内的学校）"
+                : $"\n- 所在城市：{city}（优先搜索该地级市范围内的学校）"
+            : "";
+        var locationSearchRule = !string.IsNullOrWhiteSpace(city)
+            ? isDirectControlledMunicipality
+                ? $"若提供了区/县，则搜索 query 中必须同时包含“{province}”和“{city}”，优先搜索该区/县的中学，不要扩散到该直辖市其他区县，除非某一档学校数量不足。"
+                : $"若提供了城市，则搜索 query 中必须同时包含“{province}”和“{city}”，优先搜索该地级市的中学，不要扩散到该省其他城市，除非某一档学校数量不足。"
+            : "若未提供城市或区/县，则以省份为主进行搜索，并覆盖省内不同城市的学校。";
+
         return $$"""
 请根据以下信息，推荐适合学生报考的高中学校：
 
 - 学生摸底考试分数：{{studentScore}} 分
-- 所在省份：{{province}}
+- 所在省份：{{province}}{{locationHint}}
 
 ═══════════════════════════════════════════
 【第一步：批量搜索获取高中名单（必须覆盖不同分数段）】
 ═══════════════════════════════════════════
 
-1. 调用 batch_search_any(queries=[{"query":"{{province}} 高中排名","max_results":10},{"query":"{{province}} 省级示范高中","max_results":10},{"query":"{{province}} 重点高中名单","max_results":10},{"query":"{{province}} 中考录取分数线 2025 2024 2023","max_results":10}]) 一次性获取多维度搜索结果
-2. 必须选出至少 15-20 所高中，且必须覆盖以下三类分数段：
+1. 调用 batch_search_any 时，queries 数组最多只能包含 5 个 query 对象。
+2. {{locationSearchRule}}
+3. 先调用 batch_search_any 一次性获取多维度搜索结果；如果提供了城市或区/县，则 query 必须带上对应地点；例如：
+    - 普通省份 + 地级市："{{province}}{{(string.IsNullOrWhiteSpace(city) ? "某地级市" : city)}} 高中排名"、"{{province}}{{(string.IsNullOrWhiteSpace(city) ? "某地级市" : city)}} 省级示范高中"、"{{province}}{{(string.IsNullOrWhiteSpace(city) ? "某地级市" : city)}} 重点高中名单"、"{{province}}{{(string.IsNullOrWhiteSpace(city) ? "某地级市" : city)}} 中考录取分数线 2025 2024 2023"
+    - 直辖市 + 区/县："{{province}}{{(string.IsNullOrWhiteSpace(city) ? "某区" : city)}} 中学排名"、"{{province}}{{(string.IsNullOrWhiteSpace(city) ? "某区" : city)}} 重点中学名单"、"{{province}}{{(string.IsNullOrWhiteSpace(city) ? "某区" : city)}} 中考录取分数线 2025 2024 2023"
+    - 未提供城市/区县："{{province}} 高中排名"、"{{province}} 省级示范高中"、"{{province}} 重点高中名单"、"{{province}} 中考录取分数线 2025 2024 2023"
+4. 必须选出至少 15-20 所高中，且必须覆盖以下三类分数段：
    - 高分段学校（录取线明显高于学生分数）→ 后续归为"冲"
    - 中分段学校（录取线与学生分数接近）→ 后续归为"稳"
    - 低分段学校（录取线明显低于学生分数）→ 后续归为"保"
-3. 如果只搜到录取线低的学校，必须继续搜索其他城市/区县的高分段学校，确保三档都有足够候选
+5. 如果只搜到录取线低的学校，必须继续补充搜索高分段学校；但当已提供城市或区/县时，应先在该范围内补足，只有在某一档学校明显不足时，才允许逐步扩大到同省其他城市或同直辖市其他区县
 
 ═══════════════════════════════════════════
 【第二步：逐一搜索每所高中的详细信息】
 ═══════════════════════════════════════════
 
-将所有候选学校一次性构建为批量查询数组，调用 batch_search_any 搜索：
-a) queries 数组中每所学校包含两个查询：{"query":"XX中学 中考录取分数线 2025 2024 2023 2022","max_results":10} 和 {"query":"XX中学 学校评价 特色 师资","max_results":10}
-b) 一次 batch_search_any 调用即可覆盖全部学校的录取分数线和评价信息
-c) 对 batch_search_any 返回结果中 url 最相关的条目，调用 fetch_webpage_content(url="...") 读取正文，再从正文中提取年份与分数；不能只依赖搜索摘要
+将所有候选学校构建为批量查询数组，分多次调用 batch_search_any 搜索：
+a) queries 数组中每所学校包含两个查询，且必须补齐地点限定：{"query":"{{province}} {{(string.IsNullOrWhiteSpace(city) ? "XX地区" : city)}} XX中学 中考录取分数线 2025 2024 2023 2022","max_results":10} 和 {"query":"{{province}} {{(string.IsNullOrWhiteSpace(city) ? "XX地区" : city)}} XX中学 学校评价 特色 师资","max_results":10}
+b) 每次调用 batch_search_any 时，queries 最多只能放 5 个 query 对象；如果学校较多，必须拆成多批顺序调用，直到覆盖全部学校信息
+c) 对 batch_search_any 返回结果中 url 最相关的条目，优先选择地点与 {{province}}{{(string.IsNullOrWhiteSpace(city) ? "" : city)}} 一致的结果，再调用 fetch_webpage_content(url="...") 读取正文，再从正文中提取年份与分数；不能只依赖搜索摘要
 
 ═══════════════════════════════════════════
 【第三步：分类标准（严格执行）】
@@ -652,21 +767,26 @@ c) 对 batch_search_any 返回结果中 url 最相关的条目，调用 fetch_we
     private const string SystemInstructions =
         """
         你是一位资深教育择校顾问，拥有丰富的中考志愿填报经验。你的任务是根据学生的摸底考试成绩和所在省份，
-        通过联网搜索获取该省份各重点高中的历年录取分数线和详细办学信息，然后按"冲一冲、稳一稳、保一保"三档
-        为学生推荐最适合报考的高中学校。
+        以及用户可能提供的地级市或直辖市下属区/县信息，通过联网搜索获取对应范围内各重点高中的历年录取分数线和详细办学信息，
+        然后按"冲一冲、稳一稳、保一保"三档为学生推荐最适合报考的高中学校。
 
         【可用工具】
-                - batch_search_any(queries, domain?, subDomain?, subDomainParams?)：AnySearch 批量搜索工具，支持多查询并行执行和混合领域搜索。
-          - queries（必填）：[{"query":"XX省 高中排名","max_results":10},{"query":"XX省 省级示范高中","max_results":10},{"query":"XX省 重点高中名单","max_results":10},{"query":"XX省 中考录取分数线 2025 2024 2023","max_results":10}]，支持同时搜索多所学校或多个维度。
+                    - batch_search_any(queries, domain?, subDomain?, subDomainParams?)：AnySearch 批量搜索工具，支持多查询并行执行和混合领域搜索。
+                - queries（必填）：最多只能包含 5 个 query 对象，例如 [{"query":"XX省 高中排名","max_results":10},{"query":"XX省 省级示范高中","max_results":10},{"query":"XX省 重点高中名单","max_results":10},{"query":"XX省 中考录取分数线 2025 2024 2023","max_results":10}]。
           - 适用于同时搜索省份高中排名、多所学校录取分数线、学校评价等。
           - 返回搜索结果列表。
         - fetch_webpage_content(url)：读取公开网页正文。必须用于打开搜索结果中的候选链接，提取录取分数线原文证据。
 
-        【强制调研流程】
-        步骤 1：调用 batch_search_any，传入省份高中排名相关多个查询（参数： [{"query":"XX省 高中排名","max_results":10},{"query":"XX省 中考录取分数线 2025 2024 2023 2022","max_results":10},{"query":"XX省 省级示范高中","max_results":10},{"query":"XX省 重点高中名单","max_results":10}]），获取 15-20 所代表性高中。
+          【强制调研流程】
+           步骤 1：调用 batch_search_any，注意每次传入的 queries 最多只能有 5 个 query 对象。
+               - 如果用户只提供省份：先搜索该省范围内的高中。
+               - 如果用户提供的是“省份 + 地级市”：所有 query 必须同时包含省份和城市，优先搜索该地级市的中学。
+               - 如果用户提供的是“直辖市 + 区/县”：所有 query 必须同时包含直辖市名称和区/县名称，优先搜索对应区/县的学校。
+               - 只有在某一档学校明显不足时，才允许逐步扩大范围到同省其他城市或同直辖市其他区县。
+               可先传入地点限定后的多个查询（例如：[{"query":"XX省XX市 高中排名","max_results":10},{"query":"XX省XX市 中考录取分数线 2025 2024 2023 2022","max_results":10},{"query":"XX省XX市 省级示范高中","max_results":10},{"query":"XX省XX市 重点高中名单","max_results":10}]；直辖市区县场景可用“XX市XX区 中学排名 / 重点中学名单 / 中考录取分数线 ...”），获取 15-20 所代表性高中。
                ⚠ 必须覆盖不同分数段的学校（高分段、中分段、低分段），不能只搜低分学校。
-        步骤 2：将步骤1获得的学校列表，构建批量查询数组（每所学校两个查询：{"query":"XX中学 中考录取分数线 2025 2024 2023 2022","max_results":10} 和 {"query":"XX中学 学校评价 特色 师资","max_results":10}），一次调用 batch_search_any 搜索所有学校的信息。
-        步骤 3：对 batch_search_any 返回的候选结果，挑选最相关的 url，继续调用 fetch_webpage_content 读取正文，并从正文中提取带年份的录取分数线。
+           步骤 2：将步骤1获得的学校列表，构建批量查询数组（每所学校两个查询，且补齐地点限定：{"query":"XX省XX市/XX区 XX中学 中考录取分数线 2025 2024 2023 2022","max_results":10} 和 {"query":"XX省XX市/XX区 XX中学 学校评价 特色 师资","max_results":10}），并拆成多批调用 batch_search_any；每一批 queries 最多只能包含 5 个 query 对象，直到覆盖所有学校的信息。
+          步骤 3：对 batch_search_any 返回的候选结果，优先挑选地点与用户输入范围一致的 url，继续调用 fetch_webpage_content 读取正文，并从正文中提取带年份的录取分数线。
                ⚠ 不允许只根据标题或摘要直接填写分数；若正文无明确分数，则该年份记为 0 或跳过该校。
                ⚠ 若 fetch_webpage_content 返回了 admissionScoreHints，先用它定位候选年份与分数，再回看正文确认该数字是否真的是该校录取线。
         步骤 4：将学校严格按以下标准分为三档，每档至少 3 所：

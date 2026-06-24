@@ -2,6 +2,7 @@ using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Microsoft.Extensions.Logging;
 
 namespace SchoolRecommender.Api.Services;
 
@@ -21,51 +22,77 @@ namespace SchoolRecommender.Api.Services;
 /// </summary>
 public sealed class DashScopeResponseFixerHandler : DelegatingHandler
 {
+    private readonly ILogger<DashScopeResponseFixerHandler>? _logger;
+
     public DashScopeResponseFixerHandler() : base(new HttpClientHandler()) { }
 
     public DashScopeResponseFixerHandler(HttpMessageHandler innerHandler) : base(innerHandler) { }
+
+    public DashScopeResponseFixerHandler(ILogger<DashScopeResponseFixerHandler>? logger) : base(new HttpClientHandler())
+    {
+        _logger = logger;
+    }
+
+    public DashScopeResponseFixerHandler(HttpMessageHandler innerHandler, ILogger<DashScopeResponseFixerHandler>? logger) : base(innerHandler)
+    {
+        _logger = logger;
+    }
 
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
-
-        if (!IsJsonResponse(response))
-        {
-            return response;
-        }
-
         try
         {
-            var originalBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-            var fixedBody = TryFixArgumentsInBody(originalBody);
+            var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
-            if (fixedBody is null)
+            if (!IsJsonResponse(response))
             {
                 return response;
             }
 
-            // 重建响应体
-            var newContent = new StringContent(fixedBody, Encoding.UTF8, "application/json");
-
-            // 复制原始响应头到新 content
-            foreach (var header in response.Content.Headers)
+            try
             {
-                if (string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
-                    continue;
+                var originalBody = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+                var fixedBody = TryFixArgumentsInBody(originalBody);
 
-                newContent.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                if (fixedBody is null)
+                {
+                    return response;
+                }
+
+                // 重建响应体
+                var newContent = new StringContent(fixedBody, Encoding.UTF8, "application/json");
+
+                // 复制原始响应头到新 content
+                foreach (var header in response.Content.Headers)
+                {
+                    if (string.Equals(header.Key, "Content-Type", StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    newContent.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+
+                response.Content = newContent;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "DashScope 响应参数修正失败，保留原始响应。Url={Url}", request.RequestUri);
+                // 解析/修正失败不影响原始响应，让 SDK 原样处理（可能后续报错）
             }
 
-            response.Content = newContent;
+            return response;
         }
-        catch
+        catch (OperationCanceledException ex) when (!cancellationToken.IsCancellationRequested)
         {
-            // 解析/修正失败不影响原始响应，让 SDK 原样处理（可能后续报错）
-        }
+            _logger?.LogWarning(
+                ex,
+                "调用大模型接口超时。Method={Method}, Url={Url}. 请增大 DASHSCOPE_NETWORK_TIMEOUT_SECONDS / OPENAI_NETWORK_TIMEOUT_SECONDS。",
+                request.Method,
+                request.RequestUri);
 
-        return response;
+            throw;
+        }
     }
 
     private static bool IsJsonResponse(HttpResponseMessage response)

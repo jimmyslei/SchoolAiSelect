@@ -18,6 +18,7 @@ import { SchoolRankingList } from "@/components/results/SchoolRanking";
 import { UniversityRankingList } from "@/components/results/UniversityRanking";
 import { HighSchoolRecommendRanking } from "@/components/results/HighSchoolRecommendRanking";
 import { ComparisonBarChart } from "@/components/results/BarChart";
+import { AgentStreamingPanel } from "@/components/shared/AgentStreamingPanel";
 import { StepIndicator } from "@/components/shared/StepIndicator";
 import { ShareButton } from "@/components/shared/ShareButton";
 import { MessageBoard } from "@/components/messages/MessageBoard";
@@ -130,6 +131,7 @@ export function HomePage() {
     locationAddress,
     analyzedCount,
     totalCount,
+    agentSteps: schoolAgentSteps,
     search,
     reset,
   } = useSchoolSearch();
@@ -141,6 +143,7 @@ export function HomePage() {
     analyzedCount: uniAnalyzedCount,
     totalCount: uniTotalCount,
     analysesMap: uniAnalysesMap,
+    agentSteps: uniAgentSteps,
     search: uniSearch,
     reset: uniReset,
   } = useUniversitySearch();
@@ -152,6 +155,7 @@ export function HomePage() {
     error: hsError,
     studentScore: hsStudentScore,
     province: hsProvince,
+    agentSteps: hsAgentSteps,
     search: hsSearch,
     reset: hsReset,
   } = useHighSchoolRecommend();
@@ -503,9 +507,9 @@ export function HomePage() {
   }, [auth.isAuthenticated]);
 
   const handleHighSchoolConfirm = useCallback(
-    (score: number, province: string) => {
+    (score: number, province: string, city?: string) => {
       setHsStep(1);
-      hsSearch(score, province, auth.token ?? undefined, handleAuthError);
+      hsSearch(score, province, auth.token ?? undefined, handleAuthError, city);
     },
     [hsSearch, auth.token, handleAuthError],
   );
@@ -617,12 +621,22 @@ export function HomePage() {
               )}
 
               {currentStep === 2 && selectedType && (
-                <SearchingView
-                  schoolType={selectedType}
-                  rankings={rankings}
-                  analyzedCount={analyzedCount}
-                  totalCount={totalCount}
-                />
+                <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] xl:items-start">
+                  <SearchingView
+                    schoolType={selectedType}
+                    rankings={rankings}
+                    analyzedCount={analyzedCount}
+                    totalCount={totalCount}
+                  />
+
+                  <AgentStreamingPanel
+                    title="AI 正在逐校执行分析"
+                    subtitle={`实时展示 ${SchoolTypeLabels[selectedType]} 检索、工具调用与结构化解析进度`}
+                    color="warm"
+                    steps={schoolAgentSteps}
+                    emptyHint="学校列表已返回，AI 正在逐所检索公开信息并生成分析结论。"
+                  />
+                </div>
               )}
 
               {currentStep === 3 && selectedType && (
@@ -704,11 +718,19 @@ export function HomePage() {
               )}
 
               {uniStep === 1 && (
-                <AiAnalyzingView
-                  title="AI 正在分析大学录取数据"
-                  subtitle={`已分析 ${uniAnalyzedCount}/${uniTotalCount} 所大学`}
-                  color="purple"
-                />
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(320px,1.08fr)] lg:items-start">
+                  <AiAnalyzingView
+                    title="AI 正在分析大学录取数据"
+                    subtitle={`已分析 ${uniAnalyzedCount}/${uniTotalCount} 所大学`}
+                    color="purple"
+                  />
+                  <AgentStreamingPanel
+                    title="大学分析过程实时输出"
+                    subtitle="逐行展示工具调用、参数与返回结果，便于观察 Agent 工作过程。"
+                    color="purple"
+                    steps={uniAgentSteps}
+                  />
+                </div>
               )}
 
               {uniStep === 2 && (
@@ -777,11 +799,19 @@ export function HomePage() {
               )}
 
               {hsStep === 1 && (
-                <AiAnalyzingView
-                  title="AI 正在分析高中录取数据"
-                  subtitle={`正在搜索 ${hsProvince} 的高中学校及近年录取分数线`}
-                  color="green"
-                />
+                <div className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(320px,1.08fr)] lg:items-start">
+                  <AiAnalyzingView
+                    title="AI 正在分析高中录取数据"
+                    subtitle={`正在搜索 ${hsProvince} 的高中学校及近年录取分数线`}
+                    color="green"
+                  />
+                  <AgentStreamingPanel
+                    title="高中推荐过程实时输出"
+                    subtitle="实时查看 Agent 检索录取线、读取网页与生成推荐分类的关键步骤。"
+                    color="green"
+                    steps={hsAgentSteps}
+                  />
+                </div>
               )}
 
               {hsStep === 2 && hsRecommendations.length > 0 && (

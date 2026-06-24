@@ -190,7 +190,8 @@ public sealed record UniversityRanking(
 /// <summary>高中择校推荐请求</summary>
 public sealed record HighSchoolRecommendRequest(
     int StudentScore,
-    string Province);
+    string Province,
+    string? City = null);
 
 /// <summary>高中单年录取分数线</summary>
 public sealed record HighSchoolAdmissionYear(int Year, double Score);
@@ -217,6 +218,19 @@ public sealed record HighSchoolRecommendation(
     string? EnrollmentNote,     // 招生备注，如"面向全市招生""有住宿"
     double MinAdmissionScore,      // 近年最低录取线
     double MaxAdmissionScore);     // 近年最高录取线
+
+/// <summary>Agent 流式执行步骤</summary>
+public sealed record AgentExecutionStep(
+    string Id,
+    string Scope,
+    string Status,
+    string Message,
+    DateTimeOffset Timestamp,
+    string? EntityId = null,
+    string? EntityName = null,
+    string? ToolName = null,
+    IReadOnlyDictionary<string, object?>? ToolArguments = null,
+    string? ToolResult = null);
 
 // ═══════════════════════════════════════════════════════════
 // 历史分析记录
