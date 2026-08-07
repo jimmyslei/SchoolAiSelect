@@ -1,28 +1,19 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import {
+  lazy,
+  Suspense,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import { motion } from "framer-motion";
 import { MapPin, RotateCcw, GraduationCap, Loader2 } from "lucide-react";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { AuthDialog } from "@/components/auth/AuthDialog";
 import { HeroSection } from "@/components/home/HeroSection";
-import { FeaturesSection } from "@/components/home/FeaturesSection";
-import { ValueSection } from "@/components/home/ValueSection";
-import { SearchHistoryCard } from "@/components/home/SearchHistoryCard";
-import { SchoolTypeDialog } from "@/components/search/SchoolTypeDialog";
-import { ScoreInputDialog } from "@/components/search/ScoreInputDialog";
-import { LocationStep } from "@/components/search/LocationStep";
-import { SearchingView } from "@/components/search/SearchingView";
-import { UniversitySearchDialog } from "@/components/search/UniversitySearchDialog";
-import { HighSchoolRecommendDialog } from "@/components/search/HighSchoolRecommendDialog";
-import { SchoolRankingList } from "@/components/results/SchoolRanking";
-import { UniversityRankingList } from "@/components/results/UniversityRanking";
-import { HighSchoolRecommendRanking } from "@/components/results/HighSchoolRecommendRanking";
-import { ComparisonBarChart } from "@/components/results/BarChart";
-import { AgentStreamingPanel } from "@/components/shared/AgentStreamingPanel";
 import { StepIndicator } from "@/components/shared/StepIndicator";
 import { ShareButton } from "@/components/shared/ShareButton";
-import { MessageBoard } from "@/components/messages/MessageBoard";
-import { SiteMessageBoard } from "@/components/messages/SiteMessageBoard";
 import { Button } from "@/components/ui/button";
 import { geocodeAddress, trackSiteVisit } from "@/lib/api";
 import { useAuth } from "@/hooks/useAuth";
@@ -95,9 +86,92 @@ const STEPS = ["选择类型", "获取位置", "搜索分析", "查看结果"];
 const UNI_STEPS = ["填写信息", "AI 分析", "查看排名"];
 const HS_STEPS = ["填写信息", "AI 分析", "查看推荐"];
 
+const FeaturesSection = lazy(() =>
+  import("@/components/home/FeaturesSection").then((module) => ({
+    default: module.FeaturesSection,
+  })),
+);
+const ValueSection = lazy(() =>
+  import("@/components/home/ValueSection").then((module) => ({
+    default: module.ValueSection,
+  })),
+);
+const SearchHistoryCard = lazy(() =>
+  import("@/components/home/SearchHistoryCard").then((module) => ({
+    default: module.SearchHistoryCard,
+  })),
+);
+const SchoolTypeDialog = lazy(() =>
+  import("@/components/search/SchoolTypeDialog").then((module) => ({
+    default: module.SchoolTypeDialog,
+  })),
+);
+const ScoreInputDialog = lazy(() =>
+  import("@/components/search/ScoreInputDialog").then((module) => ({
+    default: module.ScoreInputDialog,
+  })),
+);
+const LocationStep = lazy(() =>
+  import("@/components/search/LocationStep").then((module) => ({
+    default: module.LocationStep,
+  })),
+);
+const SearchingView = lazy(() =>
+  import("@/components/search/SearchingView").then((module) => ({
+    default: module.SearchingView,
+  })),
+);
+const UniversitySearchDialog = lazy(() =>
+  import("@/components/search/UniversitySearchDialog").then((module) => ({
+    default: module.UniversitySearchDialog,
+  })),
+);
+const HighSchoolRecommendDialog = lazy(() =>
+  import("@/components/search/HighSchoolRecommendDialog").then((module) => ({
+    default: module.HighSchoolRecommendDialog,
+  })),
+);
+const SchoolRankingList = lazy(() =>
+  import("@/components/results/SchoolRanking").then((module) => ({
+    default: module.SchoolRankingList,
+  })),
+);
+const UniversityRankingList = lazy(() =>
+  import("@/components/results/UniversityRanking").then((module) => ({
+    default: module.UniversityRankingList,
+  })),
+);
+const HighSchoolRecommendRanking = lazy(() =>
+  import("@/components/results/HighSchoolRecommendRanking").then((module) => ({
+    default: module.HighSchoolRecommendRanking,
+  })),
+);
+const ComparisonBarChart = lazy(() =>
+  import("@/components/results/BarChart").then((module) => ({
+    default: module.ComparisonBarChart,
+  })),
+);
+const AgentStreamingPanel = lazy(() =>
+  import("@/components/shared/AgentStreamingPanel").then((module) => ({
+    default: module.AgentStreamingPanel,
+  })),
+);
+const MessageBoard = lazy(() =>
+  import("@/components/messages/MessageBoard").then((module) => ({
+    default: module.MessageBoard,
+  })),
+);
+const SiteMessageBoard = lazy(() =>
+  import("@/components/messages/SiteMessageBoard").then((module) => ({
+    default: module.SiteMessageBoard,
+  })),
+);
+
 type SearchMode = "school" | "university" | "highschool";
 
 export function HomePage() {
+  const [showDeferredHomeSections, setShowDeferredHomeSections] =
+    useState(false);
   const [showTypeDialog, setShowTypeDialog] = useState(false);
   const [selectedType, setSelectedType] = useState<SchoolType | null>(null);
   const [selectedRadius, setSelectedRadius] = useState(5000);
@@ -554,6 +628,19 @@ export function HomePage() {
   const isInUniFlow = uniStep >= 0;
   const isInHsFlow = hsStep >= 0;
 
+  useEffect(() => {
+    if (isInFlow || isInUniFlow || isInHsFlow) {
+      setShowDeferredHomeSections(false);
+      return;
+    }
+
+    const timer = window.setTimeout(() => {
+      setShowDeferredHomeSections(true);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [isInFlow, isInUniFlow, isInHsFlow]);
+
   return (
     <div className="grain min-h-screen bg-background text-foreground">
       <Header
@@ -570,306 +657,328 @@ export function HomePage() {
               onStartUniversity={handleStartUniversity}
               onStartHighSchoolRecommend={handleStartHighSchoolRecommend}
             />
-            <div className="section-divider mx-auto max-w-4xl" />
-            <SearchHistoryCard
-              history={history}
-              onReplay={handleReplayHistory}
-              onRemove={removeHistory}
-              onClear={clearHistory}
-            />
-            <FeaturesSection />
-            <div className="section-divider mx-auto max-w-4xl" />
-            <ValueSection />
+            {showDeferredHomeSections && (
+              <Suspense fallback={null}>
+                <div className="section-divider mx-auto max-w-4xl" />
+                <SearchHistoryCard
+                  history={history}
+                  onReplay={handleReplayHistory}
+                  onRemove={removeHistory}
+                  onClear={clearHistory}
+                />
+                <FeaturesSection />
+                <div className="section-divider mx-auto max-w-4xl" />
+                <ValueSection />
+              </Suspense>
+            )}
           </>
         )}
 
         {/* ─── 学校搜索流程 ─── */}
         {isInFlow && searchMode === "school" && (
-          <section className="px-4 py-6 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-6xl space-y-6">
-              <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
-                <div>
-                  <p className="text-sm font-medium uppercase tracking-[0.24em] text-warm-600">
-                    Search Flow
-                  </p>
-                  <h1 className="mt-3 font-display text-3xl font-semibold text-neutral-900 sm:text-4xl">
-                    {selectedType
-                      ? `${SchoolTypeLabels[selectedType]}择校流程`
-                      : "择校流程"}
-                  </h1>
-                  <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-600 sm:text-base">
-                    保持原有搜索逻辑不变，重新组织为更清晰的步骤式界面，让当前位置、分析状态与结果展示更容易理解。
-                  </p>
-                </div>
+          <Suspense fallback={null}>
+            <section className="px-4 py-6 sm:px-6 lg:px-8">
+              <div className="mx-auto max-w-6xl space-y-6">
+                <div className="grid gap-4 lg:grid-cols-[0.9fr_1.1fr] lg:items-end">
+                  <div>
+                    <p className="text-sm font-medium uppercase tracking-[0.24em] text-warm-600">
+                      Search Flow
+                    </p>
+                    <h1 className="mt-3 font-display text-3xl font-semibold text-neutral-900 sm:text-4xl">
+                      {selectedType
+                        ? `${SchoolTypeLabels[selectedType]}择校流程`
+                        : "择校流程"}
+                    </h1>
+                    <p className="mt-3 max-w-2xl text-sm leading-7 text-neutral-600 sm:text-base">
+                      保持原有搜索逻辑不变，重新组织为更清晰的步骤式界面，让当前位置、分析状态与结果展示更容易理解。
+                    </p>
+                  </div>
 
-                <div className="flex flex-wrap items-center gap-3 lg:justify-end">
-                  {locationAddress && (
-                    <div className="inline-flex items-center gap-2 rounded-full bg-background/80 px-4 py-2 text-sm text-neutral-600 shadow-xs">
-                      <MapPin className="h-4 w-4 text-warm-500" />
-                      <span className="max-w-60 truncate">
-                        {locationAddress}
-                      </span>
-                    </div>
-                  )}
-                  {currentStep === 3 && (
-                    <ShareButton className="text-neutral-500 hover:text-warm-600 hover:bg-warm-50" />
-                  )}
-                  <Button onClick={handleReset} variant="outline">
-                    <RotateCcw className="h-4 w-4" />
-                    重新开始
-                  </Button>
-                </div>
-              </div>
-
-              {currentStep < 3 && (
-                <StepIndicator
-                  steps={STEPS}
-                  currentStep={currentStep}
-                  className="mb-2"
-                />
-              )}
-
-              {currentStep === 1 && (
-                <LocationStep
-                  status={geoStatus}
-                  error={geoError}
-                  onRetry={requestLocation}
-                  onManualInput={handleManualInput}
-                />
-              )}
-
-              {currentStep === 2 && selectedType && (
-                <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] xl:items-start">
-                  <SearchingView
-                    schoolType={selectedType}
-                    rankings={rankings}
-                    analyzedCount={analyzedCount}
-                    totalCount={totalCount}
-                  />
-
-                  <AgentStreamingPanel
-                    title="AI 正在逐校执行分析"
-                    subtitle={`实时展示 ${SchoolTypeLabels[selectedType]} 检索、工具调用与结构化解析进度`}
-                    color="warm"
-                    steps={schoolAgentSteps}
-                    emptyHint="学校列表已返回，AI 正在逐所检索公开信息并生成分析结论。"
-                  />
-                </div>
-              )}
-
-              {currentStep === 3 && selectedType && (
-                <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
-                  <SchoolRankingList
-                    rankings={rankings}
-                    schoolType={selectedType}
-                    locationAddress={locationAddress}
-                    analyzedCount={analyzedCount}
-                    totalCount={totalCount}
-                    onReset={handleReset}
-                  />
-
-                  {rankings.length > 1 && (
-                    <aside className="surface-elevated h-fit rounded-4xl p-5 sm:p-6 xl:sticky xl:top-28">
-                      <ComparisonBarChart rankings={rankings} />
-                    </aside>
-                  )}
-
-                  <div className="xl:col-span-2">
-                    <MessageBoard
-                      rankings={rankings}
-                      token={auth.token}
-                      user={auth.user}
-                      onRequireAuth={() => setAuthDialogOpen(true)}
-                    />
+                  <div className="flex flex-wrap items-center gap-3 lg:justify-end">
+                    {locationAddress && (
+                      <div className="inline-flex items-center gap-2 rounded-full bg-background/80 px-4 py-2 text-sm text-neutral-600 shadow-xs">
+                        <MapPin className="h-4 w-4 text-warm-500" />
+                        <span className="max-w-60 truncate">
+                          {locationAddress}
+                        </span>
+                      </div>
+                    )}
+                    {currentStep === 3 && (
+                      <ShareButton className="text-neutral-500 hover:text-warm-600 hover:bg-warm-50" />
+                    )}
+                    <Button onClick={handleReset} variant="outline">
+                      <RotateCcw className="h-4 w-4" />
+                      重新开始
+                    </Button>
                   </div>
                 </div>
-              )}
 
-              {searchStatus === "error" && (
-                <div className="surface-elevated rounded-4xl px-6 py-12 text-center">
-                  <p className="text-base text-warm-700">{searchError}</p>
-                  <Button onClick={handleReset} variant="warm" className="mt-5">
-                    重新开始
-                  </Button>
-                </div>
-              )}
-            </div>
-          </section>
+                {currentStep < 3 && (
+                  <StepIndicator
+                    steps={STEPS}
+                    currentStep={currentStep}
+                    className="mb-2"
+                  />
+                )}
+
+                {currentStep === 1 && (
+                  <LocationStep
+                    status={geoStatus}
+                    error={geoError}
+                    onRetry={requestLocation}
+                    onManualInput={handleManualInput}
+                  />
+                )}
+
+                {currentStep === 2 && selectedType && (
+                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1.05fr)_minmax(320px,0.95fr)] xl:items-start">
+                    <SearchingView
+                      schoolType={selectedType}
+                      rankings={rankings}
+                      analyzedCount={analyzedCount}
+                      totalCount={totalCount}
+                    />
+
+                    <AgentStreamingPanel
+                      title="AI 正在逐校执行分析"
+                      subtitle={`实时展示 ${SchoolTypeLabels[selectedType]} 检索、工具调用与结构化解析进度`}
+                      color="warm"
+                      steps={schoolAgentSteps}
+                      emptyHint="学校列表已返回，AI 正在逐所检索公开信息并生成分析结论。"
+                    />
+                  </div>
+                )}
+
+                {currentStep === 3 && selectedType && (
+                  <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_320px]">
+                    <SchoolRankingList
+                      rankings={rankings}
+                      schoolType={selectedType}
+                      locationAddress={locationAddress}
+                      analyzedCount={analyzedCount}
+                      totalCount={totalCount}
+                      onReset={handleReset}
+                    />
+
+                    {rankings.length > 1 && (
+                      <aside className="surface-elevated h-fit rounded-4xl p-5 sm:p-6 xl:sticky xl:top-28">
+                        <ComparisonBarChart rankings={rankings} />
+                      </aside>
+                    )}
+
+                    <div className="xl:col-span-2">
+                      <MessageBoard
+                        rankings={rankings}
+                        token={auth.token}
+                        user={auth.user}
+                        onRequireAuth={() => setAuthDialogOpen(true)}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {searchStatus === "error" && (
+                  <div className="surface-elevated rounded-4xl px-6 py-12 text-center">
+                    <p className="text-base text-warm-700">{searchError}</p>
+                    <Button
+                      onClick={handleReset}
+                      variant="warm"
+                      className="mt-5"
+                    >
+                      重新开始
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </section>
+          </Suspense>
         )}
 
         {/* ─── 大学报考分析流程 ─── */}
         {isInUniFlow && searchMode === "university" && (
-          <section className="px-4 py-6 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-4xl space-y-6">
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <p className="text-sm font-medium uppercase tracking-[0.24em] text-purple-600">
-                    University Analysis
-                  </p>
-                  <h1 className="mt-3 font-display text-3xl font-semibold text-neutral-900 sm:text-4xl">
-                    大学报考分析
-                  </h1>
+          <Suspense fallback={null}>
+            <section className="px-4 py-6 sm:px-6 lg:px-8">
+              <div className="mx-auto max-w-4xl space-y-6">
+                <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium uppercase tracking-[0.24em] text-purple-600">
+                      University Analysis
+                    </p>
+                    <h1 className="mt-3 font-display text-3xl font-semibold text-neutral-900 sm:text-4xl">
+                      大学报考分析
+                    </h1>
+                  </div>
+                  {uniStep === 0 && (
+                    <Button
+                      onClick={handleUniversityCancel}
+                      variant="outline"
+                      size="sm"
+                      className="w-full sm:w-auto"
+                    >
+                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                      返回
+                    </Button>
+                  )}
                 </div>
+
+                <StepIndicator
+                  steps={UNI_STEPS}
+                  currentStep={uniStep}
+                  className="mb-2"
+                />
+
                 {uniStep === 0 && (
-                  <Button
-                    onClick={handleUniversityCancel}
-                    variant="outline"
-                    size="sm"
-                    className="w-full sm:w-auto"
-                  >
-                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                    返回
-                  </Button>
+                  <UniversitySearchDialog
+                    onConfirm={handleUniversityConfirm}
+                    onCancel={handleUniversityCancel}
+                  />
+                )}
+
+                {uniStep === 1 && (
+                  <div className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(320px,1.08fr)] lg:items-start">
+                    <AiAnalyzingView
+                      title="AI 正在分析大学录取数据"
+                      subtitle={`已分析 ${uniAnalyzedCount}/${uniTotalCount} 所大学`}
+                      color="purple"
+                    />
+                    <AgentStreamingPanel
+                      title="大学分析过程实时输出"
+                      subtitle="逐行展示工具调用、参数与返回结果，便于观察 Agent 工作过程。"
+                      color="purple"
+                      steps={uniAgentSteps}
+                    />
+                  </div>
+                )}
+
+                {uniStep === 2 && (
+                  <UniversityRankingList
+                    rankings={uniRankings}
+                    analysesMap={uniAnalysesMap}
+                    analyzedCount={uniAnalyzedCount}
+                    totalCount={uniTotalCount}
+                    studentScore={uniStudentScore}
+                    onReset={handleUniversityReset}
+                  />
+                )}
+
+                {uniStatus === "error" && uniStep === 2 && uniError && (
+                  <div className="surface-elevated rounded-4xl px-6 py-12 text-center">
+                    <p className="text-base text-warm-700">{uniError}</p>
+                    <Button
+                      onClick={handleUniversityReset}
+                      variant="warm"
+                      className="mt-5"
+                    >
+                      重新搜索
+                    </Button>
+                  </div>
                 )}
               </div>
-
-              <StepIndicator
-                steps={UNI_STEPS}
-                currentStep={uniStep}
-                className="mb-2"
-              />
-
-              {uniStep === 0 && (
-                <UniversitySearchDialog
-                  onConfirm={handleUniversityConfirm}
-                  onCancel={handleUniversityCancel}
-                />
-              )}
-
-              {uniStep === 1 && (
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(320px,1.08fr)] lg:items-start">
-                  <AiAnalyzingView
-                    title="AI 正在分析大学录取数据"
-                    subtitle={`已分析 ${uniAnalyzedCount}/${uniTotalCount} 所大学`}
-                    color="purple"
-                  />
-                  <AgentStreamingPanel
-                    title="大学分析过程实时输出"
-                    subtitle="逐行展示工具调用、参数与返回结果，便于观察 Agent 工作过程。"
-                    color="purple"
-                    steps={uniAgentSteps}
-                  />
-                </div>
-              )}
-
-              {uniStep === 2 && (
-                <UniversityRankingList
-                  rankings={uniRankings}
-                  analysesMap={uniAnalysesMap}
-                  analyzedCount={uniAnalyzedCount}
-                  totalCount={uniTotalCount}
-                  studentScore={uniStudentScore}
-                  onReset={handleUniversityReset}
-                />
-              )}
-
-              {uniStatus === "error" && uniStep === 2 && uniError && (
-                <div className="surface-elevated rounded-4xl px-6 py-12 text-center">
-                  <p className="text-base text-warm-700">{uniError}</p>
-                  <Button
-                    onClick={handleUniversityReset}
-                    variant="warm"
-                    className="mt-5"
-                  >
-                    重新搜索
-                  </Button>
-                </div>
-              )}
-            </div>
-          </section>
+            </section>
+          </Suspense>
         )}
 
         {/* ─── 高中择校推荐流程 ─── */}
         {isInHsFlow && searchMode === "highschool" && (
-          <section className="px-4 py-6 sm:px-6 lg:px-8">
-            <div className="mx-auto max-w-4xl space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium uppercase tracking-[0.24em] text-green-600">
-                    High School Recommendation
-                  </p>
-                  <h1 className="mt-3 font-display text-3xl font-semibold text-neutral-900 sm:text-4xl">
-                    高中择校推荐
-                  </h1>
+          <Suspense fallback={null}>
+            <section className="px-4 py-6 sm:px-6 lg:px-8">
+              <div className="mx-auto max-w-4xl space-y-6">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-medium uppercase tracking-[0.24em] text-green-600">
+                      High School Recommendation
+                    </p>
+                    <h1 className="mt-3 font-display text-3xl font-semibold text-neutral-900 sm:text-4xl">
+                      高中择校推荐
+                    </h1>
+                  </div>
+                  {hsStep === 0 && (
+                    <Button
+                      onClick={handleHighSchoolCancel}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                      返回
+                    </Button>
+                  )}
                 </div>
+
+                <StepIndicator
+                  steps={HS_STEPS}
+                  currentStep={hsStep}
+                  className="mb-2"
+                />
+
                 {hsStep === 0 && (
-                  <Button
-                    onClick={handleHighSchoolCancel}
-                    variant="outline"
-                    size="sm"
-                  >
-                    <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                    返回
-                  </Button>
+                  <HighSchoolRecommendDialog
+                    onConfirm={handleHighSchoolConfirm}
+                    onCancel={handleHighSchoolCancel}
+                  />
+                )}
+
+                {hsStep === 1 && (
+                  <div className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(320px,1.08fr)] lg:items-start">
+                    <AiAnalyzingView
+                      title="AI 正在分析高中录取数据"
+                      subtitle={`正在搜索 ${hsProvince} 的高中学校及近年录取分数线`}
+                      color="green"
+                    />
+                    <AgentStreamingPanel
+                      title="高中推荐过程实时输出"
+                      subtitle="实时查看 Agent 检索录取线、读取网页与生成推荐分类的关键步骤。"
+                      color="green"
+                      steps={hsAgentSteps}
+                    />
+                  </div>
+                )}
+
+                {hsStep === 2 && hsRecommendations.length > 0 && (
+                  <HighSchoolRecommendRanking
+                    recommendations={hsRecommendations}
+                    studentScore={hsStudentScore}
+                    province={hsProvince}
+                    onReset={handleHighSchoolReset}
+                  />
+                )}
+
+                {hsStatus === "error" && hsStep === 2 && hsError && (
+                  <div className="surface-elevated rounded-4xl px-6 py-12 text-center">
+                    <p className="text-base text-warm-700">{hsError}</p>
+                    <Button
+                      onClick={handleHighSchoolReset}
+                      variant="warm"
+                      className="mt-5"
+                    >
+                      重新搜索
+                    </Button>
+                  </div>
                 )}
               </div>
-
-              <StepIndicator
-                steps={HS_STEPS}
-                currentStep={hsStep}
-                className="mb-2"
-              />
-
-              {hsStep === 0 && (
-                <HighSchoolRecommendDialog
-                  onConfirm={handleHighSchoolConfirm}
-                  onCancel={handleHighSchoolCancel}
-                />
-              )}
-
-              {hsStep === 1 && (
-                <div className="grid gap-6 lg:grid-cols-[minmax(0,0.92fr)_minmax(320px,1.08fr)] lg:items-start">
-                  <AiAnalyzingView
-                    title="AI 正在分析高中录取数据"
-                    subtitle={`正在搜索 ${hsProvince} 的高中学校及近年录取分数线`}
-                    color="green"
-                  />
-                  <AgentStreamingPanel
-                    title="高中推荐过程实时输出"
-                    subtitle="实时查看 Agent 检索录取线、读取网页与生成推荐分类的关键步骤。"
-                    color="green"
-                    steps={hsAgentSteps}
-                  />
-                </div>
-              )}
-
-              {hsStep === 2 && hsRecommendations.length > 0 && (
-                <HighSchoolRecommendRanking
-                  recommendations={hsRecommendations}
-                  studentScore={hsStudentScore}
-                  province={hsProvince}
-                  onReset={handleHighSchoolReset}
-                />
-              )}
-
-              {hsStatus === "error" && hsStep === 2 && hsError && (
-                <div className="surface-elevated rounded-4xl px-6 py-12 text-center">
-                  <p className="text-base text-warm-700">{hsError}</p>
-                  <Button
-                    onClick={handleHighSchoolReset}
-                    variant="warm"
-                    className="mt-5"
-                  >
-                    重新搜索
-                  </Button>
-                </div>
-              )}
-            </div>
-          </section>
+            </section>
+          </Suspense>
         )}
       </main>
 
-      <SchoolTypeDialog
-        open={showTypeDialog}
-        onClose={() => setShowTypeDialog(false)}
-        onSelect={handleTypeSelect}
-      />
+      {showTypeDialog && (
+        <Suspense fallback={null}>
+          <SchoolTypeDialog
+            open={showTypeDialog}
+            onClose={() => setShowTypeDialog(false)}
+            onSelect={handleTypeSelect}
+          />
+        </Suspense>
+      )}
 
-      <ScoreInputDialog
-        open={showScoreDialog}
-        onClose={handleScoreSkip}
-        onConfirm={handleScoreConfirm}
-      />
+      {showScoreDialog && (
+        <Suspense fallback={null}>
+          <ScoreInputDialog
+            open={showScoreDialog}
+            onClose={handleScoreSkip}
+            onConfirm={handleScoreConfirm}
+          />
+        </Suspense>
+      )}
 
       <AuthDialog
         open={authDialogOpen}
@@ -878,11 +987,15 @@ export function HomePage() {
         onRegister={auth.register}
       />
 
-      <SiteMessageBoard
-        token={auth.token}
-        user={auth.user}
-        onRequireAuth={() => setAuthDialogOpen(true)}
-      />
+      {showDeferredHomeSections && (
+        <Suspense fallback={null}>
+          <SiteMessageBoard
+            token={auth.token}
+            user={auth.user}
+            onRequireAuth={() => setAuthDialogOpen(true)}
+          />
+        </Suspense>
+      )}
 
       {!isInFlow && !isInUniFlow && !isInHsFlow && <Footer />}
     </div>

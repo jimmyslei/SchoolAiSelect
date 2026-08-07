@@ -72,6 +72,14 @@ interface HighSchoolHistoryPayload {
   recommendations: HighSchoolRecommendation[];
 }
 
+const SCHOOL_HISTORY_SESSION_TYPES = new Set<string>([
+  "school",
+  "kindergarten",
+  "primary",
+  "junior_high",
+  "senior_high",
+]);
+
 const HISTORY_META: Record<
   HistorySessionType,
   {
@@ -97,6 +105,18 @@ const HISTORY_META: Record<
   },
 };
 
+function getHistorySessionType(sessionType: string): HistorySessionType {
+  if (sessionType === "university" || sessionType === "highschool") {
+    return sessionType;
+  }
+
+  if (SCHOOL_HISTORY_SESSION_TYPES.has(sessionType)) {
+    return "school";
+  }
+
+  return "school";
+}
+
 function formatTime(ts: string) {
   const d = new Date(ts.substring(0, 19));
   const now = new Date();
@@ -113,13 +133,14 @@ function formatTime(ts: string) {
 
 function parseHistoryDetail(detail: AnalysisHistoryDetail): HistoryDetailState {
   const payload = JSON.parse(detail.resultJson) as Record<string, unknown>;
+  const sessionType = getHistorySessionType(detail.sessionType);
 
-  if (detail.sessionType === "school") {
+  if (sessionType === "school") {
     return {
       sessionType: "school",
       raw: detail,
       payload: {
-        schoolType: payload.schoolType as SchoolType,
+        schoolType: (payload.schoolType ?? detail.sessionType) as SchoolType,
         locationAddress: String(payload.locationAddress ?? "历史分析结果"),
         rankings: (payload.rankings as SchoolRanking[]) ?? [],
         analyzedCount: Number(payload.analyzedCount ?? 0),
@@ -128,7 +149,7 @@ function parseHistoryDetail(detail: AnalysisHistoryDetail): HistoryDetailState {
     };
   }
 
-  if (detail.sessionType === "university") {
+  if (sessionType === "university") {
     return {
       sessionType: "university",
       raw: detail,
@@ -336,7 +357,8 @@ export function AnalysisHistoryPanel({
               ) : hasItems ? (
                 <AnimatePresence mode="popLayout">
                   {items.map((item) => {
-                    const meta = HISTORY_META[item.sessionType];
+                    const meta =
+                      HISTORY_META[getHistorySessionType(item.sessionType)];
                     const Icon = meta.icon;
                     return (
                       <motion.button

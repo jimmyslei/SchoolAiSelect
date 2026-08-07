@@ -139,7 +139,7 @@ internal static class SchoolEndpoints
                         var summary = $"共分析 {rankings.Count} 所学校";
                         var requestJson = JsonSerializer.Serialize(request, jsonOptions);
                         var resultJson = JsonSerializer.Serialize(donePayload, jsonOptions);
-                        await historyService.SaveAsync(user.Id, request.SchoolType, title, requestJson, resultJson, summary, cancellationToken);
+                        await historyService.SaveAsync(user.Id, "school", title, requestJson, resultJson, summary, cancellationToken);
                     }
                     catch (Exception ex)
                     {

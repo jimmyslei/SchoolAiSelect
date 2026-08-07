@@ -1,5 +1,6 @@
 import { useCallback, useState } from "react";
 import { ArrowLeft } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Header } from "@/components/layout/Header";
 import { Footer } from "@/components/layout/Footer";
 import { AuthDialog } from "@/components/auth/AuthDialog";
@@ -9,11 +10,20 @@ import { useAuth } from "@/hooks/useAuth";
 
 export function HistoryPage() {
   const auth = useAuth();
+  const navigate = useNavigate();
   const [authDialogOpen, setAuthDialogOpen] = useState(false);
 
   const handleRequireAuth = useCallback(() => {
     setAuthDialogOpen(true);
   }, []);
+
+  const handleBackHome = useCallback(() => {
+    if (window.history.length > 1) {
+      navigate(-1);
+      return;
+    }
+    navigate("/", { replace: true });
+  }, [navigate]);
 
   return (
     <div className="grain min-h-screen bg-background text-foreground">
@@ -31,7 +41,7 @@ export function HistoryPage() {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => (window.location.href = "/")}
+                onClick={handleBackHome}
                 className="gap-1.5"
               >
                 <ArrowLeft className="h-4 w-4" />
