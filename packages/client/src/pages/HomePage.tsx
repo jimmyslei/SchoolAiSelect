@@ -463,13 +463,31 @@ export function HomePage() {
   }, [auth.isAuthenticated]);
 
   const handleUniversityConfirm = useCallback(
-    (score: number, universityNames: string[], preferredMajors: string[]) => {
-      setUniStudentScore(score);
+    (payload: {
+      studentScore: number;
+      universityNames?: string[];
+      preferredMajors: string[];
+      preferredDirections: string[];
+      personalPreferences?: string;
+      searchMode: "manual" | "recommend";
+    }) => {
+      setUniStudentScore(payload.studentScore);
       setUniStep(1);
       uniSearch(
-        score,
-        universityNames,
-        preferredMajors.length > 0 ? preferredMajors : undefined,
+        {
+          studentScore: payload.studentScore,
+          universityNames: payload.universityNames,
+          preferredMajors:
+            payload.preferredMajors.length > 0
+              ? payload.preferredMajors
+              : undefined,
+          preferredDirections:
+            payload.preferredDirections.length > 0
+              ? payload.preferredDirections
+              : undefined,
+          personalPreferences: payload.personalPreferences,
+          searchMode: payload.searchMode,
+        },
         auth.token ?? undefined,
         handleAuthError,
       );
@@ -683,7 +701,7 @@ export function HomePage() {
         {isInUniFlow && searchMode === "university" && (
           <section className="px-4 py-6 sm:px-6 lg:px-8">
             <div className="mx-auto max-w-4xl space-y-6">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <p className="text-sm font-medium uppercase tracking-[0.24em] text-purple-600">
                     University Analysis
@@ -697,6 +715,7 @@ export function HomePage() {
                     onClick={handleUniversityCancel}
                     variant="outline"
                     size="sm"
+                    className="w-full sm:w-auto"
                   >
                     <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
                     返回

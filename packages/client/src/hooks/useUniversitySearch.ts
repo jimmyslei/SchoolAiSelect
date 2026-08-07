@@ -2,6 +2,7 @@ import { useCallback, useRef, useState } from "react";
 import type {
   AgentExecutionStep,
   UniversityAnalysis,
+  UniversitySearchRequest,
   UniversityRanking,
   UniversitySearchStatus,
 } from "@/types/school";
@@ -22,9 +23,7 @@ export function useUniversitySearch() {
 
   const search = useCallback(
     async (
-      studentScore: number,
-      universityNames: string[],
-      preferredMajors?: string[],
+      request: UniversitySearchRequest,
       token?: string,
       onAuthError?: () => void,
     ) => {
@@ -44,11 +43,7 @@ export function useUniversitySearch() {
 
       try {
         for await (const event of searchUniversitiesStream(
-          {
-            studentScore,
-            universityNames,
-            preferredMajors,
-          },
+          request,
           controller.signal,
           token,
         )) {

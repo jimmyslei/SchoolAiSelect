@@ -105,4 +105,27 @@ public sealed class UniversityAnalysisOrchestrator(
         IReadOnlyList<string>? preferredMajors,
         CancellationToken cancellationToken)
         => AnalyzeStreamAsync(universityNames, studentScore, preferredMajors, progressReporter: null, cancellationToken);
+
+    public async IAsyncEnumerable<(string UniversityName, UniversityAnalysis Analysis)> RecommendStreamAsync(
+        int studentScore,
+        IReadOnlyList<string>? preferredMajors,
+        IReadOnlyList<string>? preferredDirections,
+        string? personalPreferences,
+        IAgentProgressReporter? progressReporter,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var analyses = await analysisAgent.RecommendUniversitiesAsync(
+            studentScore,
+            preferredMajors,
+            preferredDirections,
+            personalPreferences,
+            progressReporter,
+            cancellationToken);
+
+        foreach (var analysis in analyses)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            yield return (analysis.Info.Name, analysis);
+        }
+    }
 }

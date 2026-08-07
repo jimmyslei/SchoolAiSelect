@@ -12,6 +12,7 @@ import {
   BookOpen,
   Award,
   Briefcase,
+  RefreshCcw,
 } from "lucide-react";
 import type {
   UniversityAnalysis,
@@ -250,6 +251,28 @@ function MajorCard({ major }: { major: MajorAnalysis }) {
           {major.strengths}
         </p>
       )}
+      {(major.transferSupport || major.employmentProspect) && (
+        <div className="mt-2 space-y-1.5 text-xs leading-relaxed text-neutral-600">
+          {major.transferSupport && (
+            <p className="inline-flex gap-1">
+              <RefreshCcw className="mt-0.5 h-3 w-3 shrink-0 text-sky-500" />
+              <span>
+                <span className="font-medium text-neutral-700">转专业：</span>
+                {major.transferSupport}
+              </span>
+            </p>
+          )}
+          {major.employmentProspect && (
+            <p className="inline-flex gap-1">
+              <Briefcase className="mt-0.5 h-3 w-3 shrink-0 text-emerald-500" />
+              <span>
+                <span className="font-medium text-neutral-700">就业前景：</span>
+                {major.employmentProspect}
+              </span>
+            </p>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -286,11 +309,11 @@ function UniversityCard({
             <div
               className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl text-lg font-bold ${
                 ranking.rank === 1
-                  ? "bg-gradient-to-br from-amber-400 to-orange-500 text-white"
+                  ? "bg-linear-to-br from-amber-400 to-orange-500 text-white"
                   : ranking.rank === 2
-                    ? "bg-gradient-to-br from-neutral-300 to-neutral-400 text-white"
+                    ? "bg-linear-to-br from-neutral-300 to-neutral-400 text-white"
                     : ranking.rank === 3
-                      ? "bg-gradient-to-br from-amber-600 to-amber-700 text-white"
+                      ? "bg-linear-to-br from-amber-600 to-amber-700 text-white"
                       : "bg-neutral-100 text-neutral-600"
               }`}
             >

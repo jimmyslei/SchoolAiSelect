@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Agents.AI;
 using Microsoft.Extensions.AI;
 using OpenAI;
@@ -232,6 +233,126 @@ public sealed class UniversityAnalysisAgent
         CancellationToken cancellationToken)
         => AnalyzeUniversityAsync(universityName, studentScore, preferredMajors, progressReporter: null, cancellationToken);
 
+        /// <summary>
+        /// 根据分数、专业方向和个人偏好直接推荐大学与专业。
+        /// </summary>
+        public async Task<IReadOnlyList<UniversityAnalysis>> RecommendUniversitiesAsync(
+                int studentScore,
+                IReadOnlyList<string>? preferredMajors,
+                IReadOnlyList<string>? preferredDirections,
+                string? personalPreferences,
+                IAgentProgressReporter? progressReporter,
+                CancellationToken cancellationToken)
+        {
+                var majorsText = preferredMajors is { Count: > 0 }
+                        ? string.Join("、", preferredMajors)
+                        : "未指定具体专业";
+
+                var directionsText = preferredDirections is { Count: > 0 }
+                        ? string.Join("、", preferredDirections)
+                        : "未指定具体方向";
+
+                var personalPreferenceText = string.IsNullOrWhiteSpace(personalPreferences)
+                        ? "未补充额外个人偏好"
+                        : personalPreferences.Trim();
+
+                var prompt = $$"""
+请根据考生信息，直接推荐适合报考的大学和专业，并输出结构化 JSON：
+
+- 学生摸底高考成绩：{{studentScore}} 分
+- 意向专业：{{majorsText}}
+- 喜欢的方向：{{directionsText}}
+- 个人偏好：{{personalPreferenceText}}
+
+推荐规则必须严格执行：
+1. 如果分数具备冲击 985 / 211 / 双一流的竞争力，优先推荐这类学校，并给出匹配专业
+2. 如果分数处于中等水平，优先推荐省会城市或区域中心城市的本科大学及相关专业
+3. 如果分数偏低，优先推荐技能型、应用型、就业导向强的大学或专业方向
+4. 每个推荐专业都必须补充：
+     - 该专业进入大学后是否容易转专业，或学校是否支持较灵活转专业
+     - 该专业未来就业是否好就业，并简述就业去向/行业情况
+5. 必须使用联网搜索工具获取真实信息，不要凭空编造
+
+请按以下步骤执行：
+1. 结合分数判断推荐层次（985/211优先、本科省会优先、技能应用优先）
+2. 搜索 5-8 所适合报考的大学
+3. 搜索每所大学近 5 年录取分数线、学校层次、学校所在城市、学校类型
+4. 为每所大学匹配 1-3 个适合的专业，并搜索专业实力、就业、转专业政策或常见限制
+5. 综合输出推荐结果
+
+最终输出以下 JSON 格式（不要输出其他内容）：
+```json
+{
+    "recommendationMode": "score_preference",
+    "universities": [
+        {
+            "info": {
+                "name": "大学名称",
+                "city": "所在城市",
+                "province": "所在省份",
+                "level": "985/211/双一流/普通本科/高职",
+                "type": "综合/理工/师范/财经/职业技术/..."
+            },
+            "admissionScores": [
+                {"year": 2025, "minScore": 600, "avgScore": 620, "note": "主要省份汇总"}
+            ],
+            "majors": [
+                {
+                    "majorName": "专业名称",
+                    "category": "学科门类",
+                    "rank": 5,
+                    "level": "A+/A/B+",
+                    "description": "专业适配原因",
+                    "employmentRate": 95,
+                    "salaryIndex": 85,
+                    "strengths": "专业优势",
+                    "transferSupport": "支持/条件支持/较难，并简述政策特征",
+                    "employmentProspect": "就业前景与主要去向",
+                    "score": 88
+                }
+            ],
+            "overallScore": 85,
+            "admissionMatchScore": 75,
+            "summary": "该校为何适合该考生"
+        }
+    ]
+}
+```
+
+注意事项：
+- universities 至少输出 5 所，最多 8 所
+- admissionScores 尽量给出近 5 年数据，找不到的年份可跳过
+- majors 每所学校推荐 1-3 个专业
+- transferSupport 和 employmentProspect 必须填写，内容务必具体
+- overallScore、admissionMatchScore、score 都使用 0-100 的整数
+- summary 控制在 200 字以内
+""";
+
+                using var _ = _progressContext.Push(new AgentProgressScope("university-recommendation", null, "智能推荐", progressReporter));
+
+                try
+                {
+                        await ReportAsync("running", "开始根据分数与偏好推荐大学", cancellationToken: cancellationToken);
+                        var response = await _agent.RunAsync(prompt, cancellationToken: cancellationToken);
+                        var text = response.Text ?? string.Empty;
+                        await ReportAsync(
+                                "completed",
+                                "开始解析大学推荐结果",
+                                result: AgentProgressFormatter.Preview(text),
+                                cancellationToken: cancellationToken);
+
+                        var results = ParseRecommendationResults(text);
+                        await ReportAsync("completed", $"大学推荐完成，共 {results.Count} 所", cancellationToken: cancellationToken);
+                        return results;
+                }
+                catch (Exception ex)
+                {
+                        await ReportAsync("failed", $"大学推荐失败: {ex.Message}", cancellationToken: CancellationToken.None);
+                        _logger.LogError(ex, "大学推荐失败");
+                        return Array.Empty<UniversityAnalysis>();
+                }
+        }
+
     private async Task<string> InvokeToolAsync(
         string toolName,
         Dictionary<string, object?> arguments,
@@ -319,6 +440,50 @@ public sealed class UniversityAnalysisAgent
         }
     }
 
+    private IReadOnlyList<UniversityAnalysis> ParseRecommendationResults(string rawText)
+    {
+        try
+        {
+            var json = ExtractJson(rawText);
+            if (string.IsNullOrWhiteSpace(json))
+            {
+                _logger.LogWarning("未能从大学推荐输出中提取 JSON");
+                return Array.Empty<UniversityAnalysis>();
+            }
+
+            var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.ValueKind == JsonValueKind.Array)
+            {
+                return root.EnumerateArray()
+                    .Select((item, index) => ParseUniversityAnalysisElement(item, $"推荐大学{index + 1}"))
+                    .Where(item => !string.IsNullOrWhiteSpace(item.Info.Name))
+                    .ToList();
+            }
+
+            if (root.TryGetProperty("universities", out var universities) && universities.ValueKind == JsonValueKind.Array)
+            {
+                return universities.EnumerateArray()
+                    .Select((item, index) => ParseUniversityAnalysisElement(item, $"推荐大学{index + 1}"))
+                    .Where(item => !string.IsNullOrWhiteSpace(item.Info.Name))
+                    .ToList();
+            }
+
+            if (root.TryGetProperty("info", out _))
+            {
+                return [ParseUniversityAnalysisElement(root, "推荐大学")];
+            }
+
+            return Array.Empty<UniversityAnalysis>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "解析大学推荐结果失败");
+            return Array.Empty<UniversityAnalysis>();
+        }
+    }
+
     private static string? ExtractJson(string text)
     {
         // 尝试提取 ```json ... ``` 代码块
@@ -367,6 +532,21 @@ public sealed class UniversityAnalysisAgent
             Website: infoElement.TryGetProperty("website", out var w) ? w.GetString() : null);
     }
 
+    private static UniversityAnalysis ParseUniversityAnalysisElement(JsonElement root, string fallbackName)
+    {
+        var info = ParseUniversityInfo(root, fallbackName);
+        var admissionScores = ParseAdmissionScores(root);
+        var majors = ParseMajors(root);
+        var overallScore = root.TryGetProperty("overallScore", out var os) && os.TryGetInt32(out var overall)
+            ? overall
+            : 60;
+        var admissionMatch = root.TryGetProperty("admissionMatchScore", out var am) && am.TryGetInt32(out var match)
+            ? match
+            : 50;
+        var summary = root.TryGetProperty("summary", out var s) ? s.GetString() ?? string.Empty : string.Empty;
+        return new UniversityAnalysis(info, admissionScores, majors, overallScore, admissionMatch, summary);
+    }
+
     private static IReadOnlyList<UniversityAdmissionYear> ParseAdmissionScores(JsonElement root)
     {
         var result = new List<UniversityAdmissionYear>();
@@ -407,6 +587,8 @@ public sealed class UniversityAnalysisAgent
                 EmploymentRate: item.TryGetProperty("employmentRate", out var er) ? er.GetInt32() : null,
                 SalaryIndex: item.TryGetProperty("salaryIndex", out var si) ? si.GetInt32() : null,
                 Strengths: item.TryGetProperty("strengths", out var st) ? st.GetString() : null,
+                TransferSupport: item.TryGetProperty("transferSupport", out var ts) ? ts.GetString() : null,
+                EmploymentProspect: item.TryGetProperty("employmentProspect", out var ep) ? ep.GetString() : null,
                 Score: item.TryGetProperty("score", out var sc) ? sc.GetInt32() : 60));
         }
 
@@ -429,13 +611,15 @@ public sealed class UniversityAnalysisAgent
 1. 根据用户提供的大学名称和意向专业，利用联网搜索工具查找该校近 5 年的高考录取分数线
 2. 查找该校的基本信息（城市、层次等级、学校类型）
 3. 查找该校意向专业的学科评估、就业率、薪资水平等信息
-4. 根据学生的摸底成绩，评估录取可能性
+4. 补充该专业是否支持转专业、转专业政策是否友好
+5. 根据学生的摸底成绩，评估录取可能性和就业适配度
 5. 输出结构化的 JSON 分析结果
 
 重要规则：
 - 必须使用联网搜索工具获取真实数据，不要编造数据
 - 如果搜索不到某个年份的分数线，跳过该年份
 - admissionMatchScore 的计算：学生分数高于最近一年录取线 30 分以上给 90+，高 10-30 分给 70-90，接近录取线给 50-70，低于录取线给 30-50，远低于给 0-30
+- majors 中尽量补充 transferSupport 与 employmentProspect 字段
 - 所有评分使用 0-100 的整数
 - 输出必须是合法的 JSON 格式
 """;

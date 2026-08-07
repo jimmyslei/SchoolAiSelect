@@ -416,9 +416,12 @@ export async function fetchNearbyFacilities(
 export type UniversitySearchStreamEvent =
   | {
       type: "meta";
+      searchMode?: "manual" | "recommend";
       studentScore: number;
-      universityNames: string[];
+      universityNames?: string[];
       preferredMajors?: string[];
+      preferredDirections?: string[];
+      personalPreferences?: string;
       totalCount: number;
     }
   | {

@@ -252,8 +252,11 @@ export const DIMENSION_LABELS: Record<string, string> = {
 /** 大学报考搜索请求 */
 export interface UniversitySearchRequest {
   studentScore: number;
-  universityNames: string[];
+  universityNames?: string[];
   preferredMajors?: string[];
+  preferredDirections?: string[];
+  personalPreferences?: string;
+  searchMode?: "manual" | "recommend";
 }
 
 /** 单年录取分数线 */
@@ -285,6 +288,8 @@ export interface MajorAnalysis {
   employmentRate?: number; // 就业率
   salaryIndex?: number; // 薪资指数
   strengths?: string;
+  transferSupport?: string;
+  employmentProspect?: string;
   score: number; // 综合评分 0-100
 }
 

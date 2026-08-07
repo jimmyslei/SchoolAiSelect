@@ -137,8 +137,11 @@ public static class SchoolMapper
 /// <summary>大学报考搜索请求</summary>
 public sealed record UniversitySearchRequest(
     int StudentScore,
-    IReadOnlyList<string> UniversityNames,
-    IReadOnlyList<string>? PreferredMajors = null);
+    IReadOnlyList<string>? UniversityNames,
+    IReadOnlyList<string>? PreferredMajors = null,
+    IReadOnlyList<string>? PreferredDirections = null,
+    string? PersonalPreferences = null,
+    string? SearchMode = null);
 
 /// <summary>单年录取分数线</summary>
 public sealed record UniversityAdmissionYear(int Year, int MinScore, int? AvgScore = null, int? MaxScore = null, string? Note = null);
@@ -162,6 +165,8 @@ public sealed record MajorAnalysis(
     int? EmploymentRate,   // 就业率
     int? SalaryIndex,      // 薪资指数
     string? Strengths,     // 专业优势
+    string? TransferSupport,   // 是否支持转专业/政策宽松度
+    string? EmploymentProspect, // 就业前景说明
     int Score = 0);        // 综合评分 0-100
 
 /// <summary>大学分析结果（单所大学）</summary>
