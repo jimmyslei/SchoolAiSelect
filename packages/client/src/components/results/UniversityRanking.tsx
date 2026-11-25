@@ -105,7 +105,7 @@ function AdmissionTable({
   if (scores.length === 0) return null;
 
   return (
-    <div className="mt-3 overflow-hidden rounded-lg border border-neutral-100">
+    <div className="mt-3 overflow-hidden rounded-lg border border-border/60">
       <table className="w-full text-xs">
         <thead className="bg-neutral-50">
           <tr>
@@ -125,7 +125,7 @@ function AdmissionTable({
         </thead>
         <tbody>
           {scores.map((s) => (
-            <tr key={s.year} className="border-t border-neutral-50">
+            <tr key={s.year} className="border-t border-border/40">
               <td className="px-3 py-1.5 font-medium text-neutral-700">
                 {s.year}
               </td>
@@ -187,11 +187,11 @@ function ScoreTrendChart({
         y1={studentY}
         x2={w}
         y2={studentY}
-        stroke="#a3a3a3"
+        className="stroke-neutral-400"
         strokeWidth={1}
         strokeDasharray="4 3"
       />
-      <text x={2} y={studentY - 3} fontSize={8} fill="#737373">
+      <text x={2} y={studentY - 3} fontSize={8} className="fill-neutral-500">
         你的分数({safeStudentScore})
       </text>
       {/* 录取线趋势 */}
@@ -212,7 +212,7 @@ function ScoreTrendChart({
 /** 专业信息卡片 */
 function MajorCard({ major }: { major: MajorAnalysis }) {
   return (
-    <div className="rounded-lg border border-neutral-100 bg-white p-3">
+    <div className="rounded-lg border border-border/60 bg-card p-3">
       <div className="mb-1 flex items-center justify-between">
         <span className="text-sm font-medium text-neutral-800">
           {major.majorName}
@@ -295,10 +295,10 @@ function UniversityCard({
       layout
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`rounded-xl border bg-white/90 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-md ${
+      className={`rounded-xl border bg-card/90 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-md ${
         ranking.isTopPick
           ? "border-warm-300 ring-1 ring-warm-200"
-          : "border-neutral-200/80"
+          : "border-border/70"
       }`}
     >
       {/* Header */}
@@ -403,7 +403,7 @@ function UniversityCard({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-neutral-100"
+            className="overflow-hidden border-t border-border/60"
           >
             <div className="space-y-4 p-4 sm:p-5">
               {/* Admission Scores */}
@@ -414,7 +414,7 @@ function UniversityCard({
                     近年录取分数线
                   </h4>
                   {/* 趋势图 */}
-                  <div className="rounded-lg bg-white p-2">
+                  <div className="rounded-lg bg-card p-2">
                     <ScoreTrendChart
                       scores={analysis.admissionScores.map((s) => ({
                         year: s.year,
@@ -458,7 +458,7 @@ function UniversityCard({
 
       {/* Analyzing overlay */}
       {isAnalyzing && (
-        <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-white/80 backdrop-blur-xs">
+        <div className="absolute inset-0 flex items-center justify-center rounded-xl bg-card/80 backdrop-blur-xs">
           <div className="flex items-center gap-2 text-sm text-neutral-500">
             <div className="h-4 w-4 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
             分析中...
@@ -472,7 +472,7 @@ function UniversityCard({
 /** 流式分析中的大学预览卡 */
 function AnalyzingUniversityCard({ name }: { name: string }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-dashed border-neutral-200 bg-white/60 p-4">
+    <div className="flex items-center gap-3 rounded-xl border border-dashed border-border/70 bg-card/60 p-4">
       <div className="h-5 w-5 animate-spin rounded-full border-2 border-purple-400 border-t-transparent" />
       <span className="text-sm text-neutral-500">正在分析 {name}...</span>
     </div>

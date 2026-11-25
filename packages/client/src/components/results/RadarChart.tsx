@@ -8,6 +8,8 @@ import {
   Tooltip,
 } from "recharts";
 import type { SchoolAnalysis } from "@/types/school";
+import { useIsDark } from "@/hooks/useTheme";
+import { getChartTheme } from "@/lib/chartTheme";
 
 interface SchoolRadarChartProps {
   analysis: SchoolAnalysis;
@@ -18,6 +20,9 @@ export function SchoolRadarChart({
   analysis,
   schoolName,
 }: SchoolRadarChartProps) {
+  const isDark = useIsDark();
+  const chart = getChartTheme(isDark);
+
   const data = [
     {
       dimension: "师资力量",
@@ -50,25 +55,19 @@ export function SchoolRadarChart({
       </h4>
       <ResponsiveContainer width="100%" height={280}>
         <RechartsRadarChart data={data} cx="50%" cy="50%" outerRadius="72%">
-          <PolarGrid stroke="#e8e6e1" strokeDasharray="3 3" />
+          <PolarGrid stroke={chart.grid} strokeDasharray="3 3" />
           <PolarAngleAxis
             dataKey="dimension"
-            tick={{ fill: "#7d7870", fontSize: 12 }}
+            tick={{ fill: chart.axisLabel, fontSize: 12 }}
           />
           <PolarRadiusAxis
             angle={90}
             domain={[0, 100]}
-            tick={{ fill: "#a8a49c", fontSize: 10 }}
+            tick={{ fill: chart.axisTick, fontSize: 10 }}
             tickCount={5}
           />
           <Tooltip
-            contentStyle={{
-              background: "rgba(255,255,255,0.95)",
-              border: "1px solid #e8e6e1",
-              borderRadius: "12px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.06)",
-              fontSize: "13px",
-            }}
+            contentStyle={chart.tooltip}
             formatter={(value: number) => [`${value}分`, ""]}
           />
           <Radar

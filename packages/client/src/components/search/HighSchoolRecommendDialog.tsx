@@ -65,7 +65,7 @@ export function HighSchoolRecommendDialog({
       exit={{ opacity: 0, y: -20 }}
       className="mx-auto max-w-2xl"
     >
-      <div className="rounded-2xl border border-warm-200/50 bg-gradient-to-br from-white/95 to-warm-50/30 p-6 shadow-lg backdrop-blur-sm sm:p-8">
+      <div className="rounded-2xl border border-warm-200/50 bg-gradient-to-br from-card/95 to-warm-50/30 p-6 shadow-lg backdrop-blur-sm sm:p-8">
         {/* Header */}
         <div className="mb-6 flex items-center gap-3">
           <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-green-100 to-emerald-100 shadow-sm">
@@ -96,7 +96,7 @@ export function HighSchoolRecommendDialog({
               value={studentScore}
               onChange={handleScoreChange}
               onKeyDown={handleKeyDown}
-              className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-lg font-medium text-neutral-900 shadow-sm outline-none transition-all focus:border-warm-400 focus:ring-2 focus:ring-warm-200"
+              className="w-full rounded-xl border border-border/70 bg-card px-4 py-3 text-lg font-medium text-neutral-900 shadow-sm outline-none transition-all focus:border-warm-400 focus:ring-2 focus:ring-warm-200"
             />
             <span className="shrink-0 text-sm text-neutral-400">分</span>
           </div>
@@ -120,7 +120,7 @@ export function HighSchoolRecommendDialog({
               setProvince(e.target.value);
               setCity(""); // 重置城市选择
             }}
-            className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-base text-neutral-900 shadow-sm outline-none transition-all focus:border-green-400 focus:ring-2 focus:ring-green-200"
+            className="w-full rounded-xl border border-border/70 bg-card px-4 py-3 text-base text-neutral-900 shadow-sm outline-none transition-all focus:border-green-400 focus:ring-2 focus:ring-green-200"
           >
             <option value="">请选择省份</option>
             {PROVINCES.map((p) => (
@@ -148,7 +148,7 @@ export function HighSchoolRecommendDialog({
             <select
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-base text-neutral-900 shadow-sm outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200"
+              className="w-full rounded-xl border border-border/70 bg-card px-4 py-3 text-base text-neutral-900 shadow-sm outline-none transition-all focus:border-emerald-400 focus:ring-2 focus:ring-emerald-200"
             >
               <option value="">全部城市</option>
               {cities.map((c) => (

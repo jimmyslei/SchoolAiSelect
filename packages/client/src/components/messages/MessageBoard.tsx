@@ -143,7 +143,7 @@ export function MessageBoard({
                   ? `以 ${user.displayName} 的身份分享 ${selectedSchool.name} 的信息...`
                   : "登录后可发布学校留言"
               }
-              className="min-h-24 w-full resize-none rounded-2xl border border-border/80 bg-white/80 px-4 py-3 text-sm leading-6 outline-none transition focus:border-warm-300 focus:ring-2 focus:ring-warm-100"
+              className="min-h-24 w-full resize-none rounded-2xl border border-border/80 bg-card/80 px-4 py-3 text-sm leading-6 outline-none transition focus:border-warm-300 focus:ring-2 focus:ring-warm-100"
               maxLength={1000}
             />
             <div className="mt-3 flex items-center justify-between gap-3">
@@ -185,7 +185,7 @@ export function MessageBoard({
         {messages.map((message) => (
           <article
             key={message.id}
-            className="rounded-3xl border border-border/70 bg-white/70 p-4"
+            className="rounded-3xl border border-border/70 bg-card/70 p-4"
           >
             <div className="flex items-start gap-3">
               <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-warm-100 text-warm-700">

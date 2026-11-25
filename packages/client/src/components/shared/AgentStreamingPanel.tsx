@@ -23,17 +23,17 @@ const colorMap = {
   purple: {
     badge: "bg-purple-50 text-purple-700 ring-purple-200",
     dot: "bg-purple-500",
-    surface: "from-purple-50/80 via-white to-purple-50/40",
+    surface: "from-purple-50/80 via-card to-purple-50/40",
   },
   green: {
     badge: "bg-green-50 text-green-700 ring-green-200",
     dot: "bg-green-500",
-    surface: "from-green-50/80 via-white to-green-50/40",
+    surface: "from-green-50/80 via-card to-green-50/40",
   },
   warm: {
     badge: "bg-warm-50 text-warm-700 ring-warm-200",
     dot: "bg-warm-500",
-    surface: "from-warm-50/80 via-white to-sand-50/50",
+    surface: "from-warm-50/80 via-card to-sand-50/50",
   },
 } as const;
 
@@ -144,7 +144,7 @@ export function AgentStreamingPanel({
         className="max-h-112 space-y-3 overflow-y-auto px-4 py-4 sm:px-6"
       >
         {steps.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-border/70 bg-white/70 px-5 py-8 text-center text-sm leading-7 text-neutral-500">
+          <div className="rounded-3xl border border-dashed border-border/70 bg-card/70 px-5 py-8 text-center text-sm leading-7 text-neutral-500">
             {emptyHint}
           </div>
         ) : (
@@ -158,7 +158,7 @@ export function AgentStreamingPanel({
                 key={step.itemKey}
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="rounded-3xl border border-border/60 bg-white/80 px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)]"
+                className="rounded-3xl border border-border/60 bg-card/80 px-4 py-4 shadow-[0_8px_24px_rgba(15,23,42,0.06)] dark:shadow-[0_8px_24px_rgba(0,0,0,0.35)]"
               >
                 <div className="flex items-start gap-3">
                   <div className="mt-0.5 flex h-8 w-8 items-center justify-center rounded-full bg-neutral-100 text-neutral-700">

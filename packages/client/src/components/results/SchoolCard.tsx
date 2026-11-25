@@ -87,7 +87,7 @@ export function SchoolCard({
       }
       onClick={analyzing ? undefined : compareMode ? undefined : onClick}
       className={cn(
-        "relative p-5 rounded-2xl bg-gradient-to-br from-white to-warm-50/30 border transition-all duration-300 backdrop-blur-sm",
+        "relative p-5 rounded-2xl bg-gradient-to-br from-card to-warm-50/30 border transition-all duration-300 backdrop-blur-sm",
         analyzing
           ? "border-warm-100 shadow-sm cursor-wait opacity-90"
           : compareMode
@@ -98,7 +98,7 @@ export function SchoolCard({
           : !analyzing
             ? isSelected
               ? "border-warm-300 shadow-md ring-2 ring-warm-200/50"
-              : "border-neutral-100/60 shadow-sm hover:border-warm-200/70 hover:shadow-md"
+              : "border-border/60 shadow-sm hover:border-warm-200/70 hover:shadow-md"
             : "",
       )}
     >

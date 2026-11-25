@@ -52,7 +52,7 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
       </Button>
 
       {/* 学校头部 */}
-      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-warm-50/30 p-6 shadow-sm backdrop-blur-sm mb-4">
+      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-card to-warm-50/30 p-6 shadow-sm backdrop-blur-sm mb-4">
         <div className="flex items-start justify-between gap-4">
           <div>
             <div className="flex items-center gap-2 mb-1">
@@ -89,12 +89,12 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
       </div>
 
       {/* 雷达图 */}
-      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-sand-50/30 p-6 shadow-sm backdrop-blur-sm mb-4">
+      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-card to-sand-50/30 p-6 shadow-sm backdrop-blur-sm mb-4">
         <SchoolRadarChart analysis={analysis} schoolName={school.name} />
       </div>
 
       {/* 详细指标 */}
-      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-warm-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
+      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-card to-warm-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
         <h3 className="font-semibold text-neutral-800 mb-4">详细分析</h3>
         <div className="space-y-4">
           <DetailItem
@@ -138,7 +138,7 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
 
       {/* 获奖详情 */}
       {analysis.awardsDetail.length > 0 && (
-        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-gold-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
+        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-card to-gold-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
           <h3 className="font-semibold text-neutral-800 mb-3">获奖记录</h3>
           <div className="space-y-2">
             {analysis.awardsDetail.map((award, i) => (
@@ -155,7 +155,7 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
       )}
 
       {/* 周边生活设施 */}
-      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-peach-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
+      <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-card to-peach-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
         <NearbyFacilities
           latitude={school.latitude}
           longitude={school.longitude}
@@ -165,7 +165,7 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
 
       {/* 高中录取分数线 */}
       {analysis.admissionCutoffScores && (
-        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-warm-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
+        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-card to-warm-50/20 p-6 shadow-sm backdrop-blur-sm mb-4">
           <h3 className="font-semibold text-neutral-800 mb-3 flex items-center gap-2">
             <Award className="w-4 h-4 text-gold-500" />
             历年录取分数线
@@ -193,13 +193,13 @@ export function SchoolDetail({ ranking, onBack }: SchoolDetailProps) {
 
       {/* 信息来源 */}
       {analysis.sources.length > 0 && (
-        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-white to-sand-50/20 p-6 shadow-sm backdrop-blur-sm mb-8">
+        <div className="rounded-2xl border border-border/40 bg-gradient-to-br from-card to-sand-50/20 p-6 shadow-sm backdrop-blur-sm mb-8">
           <h3 className="font-semibold text-neutral-800 mb-3">信息来源</h3>
           <div className="space-y-2">
             {analysis.sources.map((source, i) => (
               <div
                 key={i}
-                className="flex items-center justify-between py-2 border-b border-neutral-50 last:border-0"
+                className="flex items-center justify-between py-2 border-b border-border/50 last:border-0"
               >
                 <div className="flex items-center gap-2">
                   <ExternalLink className="w-3.5 h-3.5 text-neutral-400" />
@@ -301,7 +301,7 @@ function AdmissionCutoffTable({ cutoffsJson }: { cutoffsJson: string }) {
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-neutral-100">
+    <div className="overflow-hidden rounded-xl border border-border/70">
       <table className="w-full text-sm">
         <thead>
           <tr className="bg-neutral-50 text-neutral-500">
@@ -313,7 +313,7 @@ function AdmissionCutoffTable({ cutoffsJson }: { cutoffsJson: string }) {
           {entries.map((entry, i) => (
             <tr
               key={entry.year}
-              className={i % 2 === 0 ? "bg-white" : "bg-neutral-50/50"}
+              className={i % 2 === 0 ? "bg-card" : "bg-neutral-50/50"}
             >
               <td className="px-4 py-2.5 text-neutral-700 font-medium">
                 {entry.year} 年

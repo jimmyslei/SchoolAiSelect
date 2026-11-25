@@ -46,7 +46,7 @@ export function WeightAdjuster({
   const totalWeight = Object.values(weights).reduce((s, w) => s + w, 0);
 
   return (
-    <div className="bg-white rounded-2xl border border-neutral-100 shadow-sm overflow-hidden">
+    <div className="bg-card rounded-2xl border border-border/60 shadow-sm dark:shadow-[0_8px_24px_rgba(0,0,0,0.35)] overflow-hidden">
       {/* 触发器 */}
       <button
         onClick={() => setExpanded(!expanded)}
@@ -154,7 +154,7 @@ export function WeightAdjuster({
               </div>
 
               {/* 底部操作 */}
-              <div className="flex items-center justify-between mt-5 pt-3 border-t border-neutral-50">
+              <div className="flex items-center justify-between mt-5 pt-3 border-t border-border/50">
                 <span className="text-[11px] text-neutral-400">
                   权重总和：{Math.round(totalWeight * 100)}%
                   {Math.abs(totalWeight - 1) > 0.01 && (

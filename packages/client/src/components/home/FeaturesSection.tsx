@@ -108,7 +108,7 @@ export function FeaturesSection() {
               </p>
 
               {/* Decorative corner glow */}
-              <div className="absolute -bottom-10 -right-10 h-36 w-36 rounded-full bg-white/40 blur-2xl transition-transform duration-500 group-hover:scale-125" />
+              <div className="absolute -bottom-10 -right-10 h-36 w-36 rounded-full bg-white/40 blur-2xl transition-transform duration-500 group-hover:scale-125 dark:bg-warm-500/10" />
             </motion.div>
           ))}
         </div>

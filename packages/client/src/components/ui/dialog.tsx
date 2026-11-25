@@ -34,7 +34,7 @@ function DialogOverlay({
   return (
     <DialogPrimitive.Overlay
       className={cn(
-        "fixed inset-0 z-50 bg-[rgba(34,24,18,0.42)] backdrop-blur-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+        "fixed inset-0 z-50 bg-[rgba(34,24,18,0.42)] backdrop-blur-md dark:bg-[rgba(4,3,2,0.66)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
         className,
       )}
       {...props}
@@ -52,7 +52,7 @@ function DialogContent({
       <DialogOverlay />
       <DialogPrimitive.Content
         className={cn(
-          "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-1.5rem)] max-w-xl translate-x-[-50%] translate-y-[-50%] gap-4 rounded-[32px] border border-border/80 bg-[linear-gradient(180deg,rgba(255,252,247,0.98),rgba(255,247,239,0.94))] p-6 shadow-[0_30px_80px_rgba(84,54,31,0.18)] duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:p-8",
+          "fixed left-[50%] top-[50%] z-50 grid w-[calc(100%-1.5rem)] max-w-xl translate-x-[-50%] translate-y-[-50%] gap-4 rounded-[32px] border border-border/80 bg-[linear-gradient(180deg,rgba(255,252,247,0.98),rgba(255,247,239,0.94))] p-6 shadow-[0_30px_80px_rgba(84,54,31,0.18)] duration-200 dark:bg-[linear-gradient(180deg,rgba(30,26,24,0.98),rgba(22,18,16,0.96))] dark:shadow-[0_30px_80px_rgba(0,0,0,0.6)] data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:p-8",
           className,
         )}
         {...props}

@@ -194,7 +194,7 @@ export function NearbyFacilities({
                       <span
                         className={cn(
                           "text-[10px] px-1 rounded-full min-w-4 text-center",
-                          isActive ? "bg-white/60" : "bg-neutral-200/60",
+                          isActive ? "bg-white/60 dark:bg-black/25" : "bg-neutral-200/60",
                         )}
                       >
                         {count}

@@ -137,11 +137,11 @@ function ScoreTrendChart({
         y1={studentY}
         x2={w}
         y2={studentY}
-        stroke="#a3a3a3"
+        className="stroke-neutral-400"
         strokeWidth={1}
         strokeDasharray="4 3"
       />
-      <text x={2} y={studentY - 3} fontSize={8} fill="#737373">
+      <text x={2} y={studentY - 3} fontSize={8} className="fill-neutral-500">
         你的分数({studentScore})
       </text>
       {/* 录取线趋势 */}
@@ -203,7 +203,7 @@ function SchoolCard({
       layout
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
-      className={`rounded-xl border bg-white/90 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-md ${config.borderColor}`}
+      className={`rounded-xl border bg-card/90 shadow-sm backdrop-blur-sm transition-shadow hover:shadow-md ${config.borderColor}`}
     >
       <div className="p-4 sm:p-5">
         {/* ── 头部：校名 + 城市 + 标签 ── */}
@@ -338,7 +338,7 @@ function SchoolCard({
             initial={{ height: 0, opacity: 0 }}
             animate={{ height: "auto", opacity: 1 }}
             exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-t border-neutral-100"
+            className="overflow-hidden border-t border-border/60"
           >
             <div className="space-y-4 px-4 pb-4 pt-3 sm:px-5">
               {/* 分数趋势图 */}
@@ -348,7 +348,7 @@ function SchoolCard({
                     <BarChart3 className="h-3.5 w-3.5" />
                     录取分数线趋势
                   </h4>
-                  <div className="rounded-lg bg-white p-2">
+                  <div className="rounded-lg bg-card p-2">
                     <ScoreTrendChart
                       scores={validScores}
                       studentScore={studentScore}
@@ -363,7 +363,7 @@ function SchoolCard({
                   <h4 className="mb-2 text-xs font-medium text-neutral-500">
                     近年录取分数线明细
                   </h4>
-                  <div className="overflow-hidden rounded-lg border border-neutral-100">
+                  <div className="overflow-hidden rounded-lg border border-border/60">
                     <table className="w-full text-xs">
                       <thead className="bg-neutral-50">
                         <tr>
@@ -384,7 +384,7 @@ function SchoolCard({
                           return (
                             <tr
                               key={s.year}
-                              className="border-t border-neutral-50"
+                              className="border-t border-border/40"
                             >
                               <td className="px-3 py-1.5 font-medium text-neutral-700">
                                 {s.year}
@@ -556,7 +556,7 @@ export function HighSchoolRecommendRanking({
 
       {/* Empty State */}
       {recommendations.length === 0 && (
-        <div className="rounded-2xl border border-neutral-200 bg-white/80 px-6 py-12 text-center">
+        <div className="rounded-2xl border border-border/70 bg-card/80 px-6 py-12 text-center">
           <GraduationCap className="mx-auto h-12 w-12 text-neutral-300" />
           <p className="mt-3 text-neutral-500">暂无推荐结果</p>
         </div>

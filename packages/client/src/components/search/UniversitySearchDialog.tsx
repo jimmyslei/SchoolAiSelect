@@ -186,7 +186,7 @@ export function UniversitySearchDialog({
       exit={{ opacity: 0, y: -20 }}
       className="mx-auto w-full max-w-2xl"
     >
-      <div className="rounded-[28px] border border-warm-200/50 bg-linear-to-br from-white/95 to-warm-50/30 p-4 shadow-lg backdrop-blur-sm sm:rounded-4xl sm:p-8">
+      <div className="rounded-[28px] border border-warm-200/50 bg-linear-to-br from-card/95 to-warm-50/30 p-4 shadow-lg backdrop-blur-sm sm:rounded-4xl sm:p-8">
         {/* Header */}
         <div className="mb-6 flex items-start gap-3 sm:items-center">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-linear-to-br from-purple-100 to-blue-100 shadow-sm sm:h-12 sm:w-12">
@@ -209,7 +209,7 @@ export function UniversitySearchDialog({
             className={`rounded-2xl border px-4 py-3 text-left transition-all ${
               searchMode === "manual"
                 ? "border-purple-300 bg-purple-50 shadow-sm"
-                : "border-neutral-200 bg-white hover:border-purple-200"
+                : "border-border/70 bg-card hover:border-purple-200"
             }`}
           >
             <div className="flex items-center gap-2 text-sm font-medium text-neutral-800">
@@ -226,7 +226,7 @@ export function UniversitySearchDialog({
             className={`rounded-2xl border px-4 py-3 text-left transition-all ${
               searchMode === "recommend"
                 ? "border-blue-300 bg-blue-50 shadow-sm"
-                : "border-neutral-200 bg-white hover:border-blue-200"
+                : "border-border/70 bg-card hover:border-blue-200"
             }`}
           >
             <div className="flex items-center gap-2 text-sm font-medium text-neutral-800">
@@ -254,7 +254,7 @@ export function UniversitySearchDialog({
               placeholder="输入分数，如 580"
               value={studentScore}
               onChange={(e) => setStudentScore(e.target.value)}
-              className="w-full rounded-xl border border-neutral-200 bg-white px-4 py-3 text-lg font-medium text-neutral-900 shadow-sm outline-none transition-all focus:border-warm-400 focus:ring-2 focus:ring-warm-200"
+              className="w-full rounded-xl border border-border/70 bg-card px-4 py-3 text-lg font-medium text-neutral-900 shadow-sm outline-none transition-all focus:border-warm-400 focus:ring-2 focus:ring-warm-200"
             />
             <span className="shrink-0 pl-1 text-sm text-neutral-400 sm:pl-0">
               / 750
@@ -277,7 +277,7 @@ export function UniversitySearchDialog({
                 value={uniInput}
                 onChange={(e) => setUniInput(e.target.value)}
                 onKeyDown={handleUniInputKeyDown}
-                className="flex-1 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-sm outline-none transition-all focus:border-purple-400 focus:ring-2 focus:ring-purple-200"
+                className="flex-1 rounded-xl border border-border/70 bg-card px-4 py-2.5 text-sm shadow-sm outline-none transition-all focus:border-purple-400 focus:ring-2 focus:ring-purple-200"
               />
               <Button
                 size="sm"
@@ -322,7 +322,7 @@ export function UniversitySearchDialog({
                   <button
                     key={name}
                     onClick={() => addUniversity(name)}
-                    className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-600 transition-colors hover:border-purple-300 hover:bg-purple-50 hover:text-purple-700"
+                    className="rounded-full border border-border/70 bg-card px-2.5 py-1 text-xs text-neutral-600 transition-colors hover:border-purple-300 hover:bg-purple-50 hover:text-purple-700"
                   >
                     + {name}
                   </button>
@@ -346,7 +346,7 @@ export function UniversitySearchDialog({
               value={majorInput}
               onChange={(e) => setMajorInput(e.target.value)}
               onKeyDown={handleMajorInputKeyDown}
-              className="flex-1 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
+              className="flex-1 rounded-xl border border-border/70 bg-card px-4 py-2.5 text-sm shadow-sm outline-none transition-all focus:border-blue-400 focus:ring-2 focus:ring-blue-200"
             />
             <Button
               size="sm"
@@ -391,7 +391,7 @@ export function UniversitySearchDialog({
                 <button
                   key={name}
                   onClick={() => addMajor(name)}
-                  className="rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
+                  className="rounded-full border border-border/70 bg-card px-2.5 py-1 text-xs text-neutral-600 transition-colors hover:border-blue-300 hover:bg-blue-50 hover:text-blue-700"
                 >
                   + {name}
                 </button>
@@ -415,7 +415,7 @@ export function UniversitySearchDialog({
               value={directionInput}
               onChange={(e) => setDirectionInput(e.target.value)}
               onKeyDown={handleDirectionInputKeyDown}
-              className="flex-1 rounded-xl border border-neutral-200 bg-white px-4 py-2.5 text-sm shadow-sm outline-none transition-all focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
+              className="flex-1 rounded-xl border border-border/70 bg-card px-4 py-2.5 text-sm shadow-sm outline-none transition-all focus:border-sky-400 focus:ring-2 focus:ring-sky-200"
             />
             <Button
               size="sm"
@@ -464,7 +464,7 @@ export function UniversitySearchDialog({
             placeholder="例如：想去省会城市、希望以后好就业、家里更希望读师范或医学、能接受转专业竞争等"
             value={personalPreferences}
             onChange={(e) => setPersonalPreferences(e.target.value)}
-            className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm shadow-sm outline-none transition-all focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
+            className="w-full rounded-2xl border border-border/70 bg-card px-4 py-3 text-sm shadow-sm outline-none transition-all focus:border-rose-300 focus:ring-2 focus:ring-rose-100"
           />
         </div>
 

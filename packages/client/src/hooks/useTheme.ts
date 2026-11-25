@@ -17,6 +17,26 @@ function applyTheme(theme: Theme) {
 
 const STORAGE_KEY = "school-theme";
 
+/** 监听 <html> 上的 dark class，供图表等需要 JS 取色的场景使用 */
+export function useIsDark() {
+  const [isDark, setIsDark] = useState(() => {
+    if (typeof document === "undefined") return false;
+    return document.documentElement.classList.contains("dark");
+  });
+
+  useEffect(() => {
+    const root = document.documentElement;
+    const sync = () => setIsDark(root.classList.contains("dark"));
+    sync();
+
+    const observer = new MutationObserver(sync);
+    observer.observe(root, { attributes: true, attributeFilter: ["class"] });
+    return () => observer.disconnect();
+  }, []);
+
+  return isDark;
+}
+
 export function useTheme() {
   const [theme, setThemeState] = useState<Theme>(() => {
     if (typeof window === "undefined") return "system";

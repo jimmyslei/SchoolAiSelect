@@ -249,7 +249,7 @@ export function AnalysisHistoryPanel({
 
   return (
     <section className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-      <div className="overflow-hidden rounded-4xl border border-border/40 bg-linear-to-br from-white to-warm-50/30 p-5 shadow-sm backdrop-blur-sm sm:p-6">
+      <div className="overflow-hidden rounded-4xl border border-border/40 bg-linear-to-br from-card to-warm-50/30 p-5 shadow-sm backdrop-blur-sm sm:p-6">
         <div className="flex flex-col gap-3 border-b border-border/40 pb-5 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <div className="inline-flex items-center gap-2 rounded-full bg-background/70 px-3 py-1 text-xs font-medium text-warm-700">
@@ -379,7 +379,7 @@ export function AnalysisHistoryPanel({
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
-                              <span className="rounded-full bg-white/80 px-2.5 py-0.5 text-[11px] font-medium text-neutral-500 shadow-xs">
+                              <span className="rounded-full bg-card/80 px-2.5 py-0.5 text-[11px] font-medium text-neutral-500 shadow-xs">
                                 {meta.label}
                               </span>
                               <span className="inline-flex items-center gap-1 text-xs text-neutral-400">

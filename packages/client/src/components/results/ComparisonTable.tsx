@@ -93,7 +93,7 @@ export function ComparisonTable({ rankings }: ComparisonTableProps) {
       <table className="w-full text-sm">
         {/* 表头：学校名称 */}
         <thead>
-          <tr className="border-b border-neutral-100">
+          <tr className="border-b border-border/70">
             <th className="py-3 pr-4 text-left text-xs font-medium text-neutral-500 w-28">
               维度
             </th>
@@ -122,7 +122,7 @@ export function ComparisonTable({ rankings }: ComparisonTableProps) {
 
         <tbody>
           {/* 综合评分行 */}
-          <tr className="border-b border-neutral-50 bg-warm-50/30">
+          <tr className="border-b border-border/50 bg-warm-50/30">
             <td className="py-3 pr-4 text-left">
               <div className="flex items-center gap-1.5">
                 <Star className="w-3.5 h-3.5 text-warm-500" />
@@ -144,7 +144,7 @@ export function ComparisonTable({ rankings }: ComparisonTableProps) {
           </tr>
 
           {/* 距离行 */}
-          <tr className="border-b border-neutral-50">
+          <tr className="border-b border-border/50">
             <td className="py-3 pr-4 text-left">
               <div className="flex items-center gap-1.5">
                 <MapPin className="w-3.5 h-3.5 text-neutral-400" />
@@ -180,7 +180,7 @@ export function ComparisonTable({ rankings }: ComparisonTableProps) {
             return (
               <tr
                 key={dim.key}
-                className="border-b border-neutral-50 hover:bg-neutral-50/50 transition-colors"
+                className="border-b border-border/50 hover:bg-neutral-50/50 transition-colors"
               >
                 <td className="py-3 pr-4 text-left">
                   <div className="flex items-center gap-1.5">
@@ -229,7 +229,7 @@ export function ComparisonTable({ rankings }: ComparisonTableProps) {
           })}
 
           {/* 获奖详情 */}
-          <tr className="border-b border-neutral-50">
+          <tr className="border-b border-border/50">
             <td className="py-3 pr-4 text-left">
               <div className="flex items-center gap-1.5">
                 <Award className="w-3.5 h-3.5 text-neutral-400" />

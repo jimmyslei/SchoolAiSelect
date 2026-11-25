@@ -130,7 +130,7 @@ export function SiteMessageBoard({
             onClick={() => setOpen(false)}
           />
           {/* 面板 */}
-          <div className="relative z-10 flex h-full w-full max-w-md flex-col bg-gradient-to-b from-white to-warm-50/30 shadow-2xl animate-slide-in-right">
+          <div className="relative z-10 flex h-full w-full max-w-md flex-col bg-gradient-to-b from-card to-warm-50/30 shadow-2xl animate-slide-in-right">
             {/* ── 顶栏 ── */}
             <div className="flex items-center justify-between border-b border-border/60 px-5 py-4">
               <div className="flex items-center gap-2.5">
@@ -177,7 +177,7 @@ export function SiteMessageBoard({
               {messages.map((message) => (
                 <article
                   key={message.id}
-                  className="rounded-2xl border border-border/50 bg-white/80 p-3.5"
+                  className="rounded-2xl border border-border/50 bg-card/80 p-3.5"
                 >
                   <div className="flex items-start gap-2.5">
                     <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-600">
@@ -283,7 +283,7 @@ export function SiteMessageBoard({
             </div>
 
             {/* ── 底部输入栏（固定） ── */}
-            <div className="border-t border-border/60 bg-white/90 px-4 py-3 backdrop-blur">
+            <div className="border-t border-border/60 bg-card/90 px-4 py-3 backdrop-blur">
               {error && (
                 <p className="mb-2 rounded-xl bg-red-50 px-3 py-2 text-xs text-red-600">
                   {error}
@@ -299,7 +299,7 @@ export function SiteMessageBoard({
                       : "登录后可发布留言"
                   }
                   rows={1}
-                  className="max-h-24 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-border/80 bg-white px-3 py-2 text-sm leading-5 outline-none transition focus:border-warm-300 focus:ring-2 focus:ring-warm-100"
+                  className="max-h-24 min-h-[2.5rem] flex-1 resize-none rounded-xl border border-border/80 bg-card px-3 py-2 text-sm leading-5 outline-none transition focus:border-warm-300 focus:ring-2 focus:ring-warm-100"
                   maxLength={1000}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey) {

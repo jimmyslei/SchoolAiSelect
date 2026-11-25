@@ -18,7 +18,7 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
   return (
     <div
       className={cn(
-        "flex items-center bg-neutral-100 dark:bg-neutral-800 rounded-lg p-0.5",
+        "flex items-center bg-neutral-100 rounded-lg p-0.5",
         className,
       )}
     >
@@ -29,8 +29,8 @@ export function ThemeToggle({ className }: ThemeToggleProps) {
           className={cn(
             "p-1.5 rounded-md transition-all duration-200",
             theme === value
-              ? "bg-white dark:bg-neutral-700 shadow-sm text-warm-600 dark:text-warm-400"
-              : "text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300",
+              ? "bg-background shadow-sm text-warm-600"
+              : "text-neutral-400 hover:text-neutral-600",
           )}
           title={label}
           aria-label={label}

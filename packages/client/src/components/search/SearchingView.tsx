@@ -131,7 +131,7 @@ export function SearchingView({
                   delay: 0.4,
                 }}
               />
-              <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-white/90 shadow-sm">
+              <div className="relative flex h-8 w-8 items-center justify-center rounded-full bg-card/90 shadow-sm">
                 <Loader2 className="h-4 w-4 animate-spin text-warm-500" />
               </div>
             </div>
@@ -219,7 +219,7 @@ function SearchProgressCard({ ranking, index }: SearchProgressCardProps) {
         "flex items-center gap-3 rounded-2xl border px-4 py-3 transition-colors",
         analyzing
           ? "border-warm-100 bg-warm-50/40"
-          : "border-neutral-100 bg-white/70",
+          : "border-border/60 bg-card/70",
       )}
     >
       {/* 序号 */}

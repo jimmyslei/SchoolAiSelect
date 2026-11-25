@@ -10,6 +10,8 @@ import {
   LabelList,
 } from "recharts";
 import type { SchoolRanking } from "@/types/school";
+import { useIsDark } from "@/hooks/useTheme";
+import { getChartTheme } from "@/lib/chartTheme";
 
 interface ComparisonBarChartProps {
   rankings: SchoolRanking[];
@@ -27,6 +29,9 @@ const COLORS = [
 ];
 
 export function ComparisonBarChart({ rankings }: ComparisonBarChartProps) {
+  const isDark = useIsDark();
+  const chart = getChartTheme(isDark);
+
   const data = rankings.slice(0, 8).map((r) => ({
     name:
       r.school.name.length > 6
@@ -52,28 +57,22 @@ export function ComparisonBarChart({ rankings }: ComparisonBarChartProps) {
         >
           <CartesianGrid
             strokeDasharray="3 3"
-            stroke="#f0ede8"
+            stroke={chart.gridSoft}
             horizontal={false}
           />
           <XAxis
             type="number"
             domain={[0, 100]}
-            tick={{ fill: "#a8a49c", fontSize: 11 }}
+            tick={{ fill: chart.axisTick, fontSize: 11 }}
           />
           <YAxis
             type="category"
             dataKey="name"
             width={70}
-            tick={{ fill: "#5c574f", fontSize: 11 }}
+            tick={{ fill: chart.valueLabel, fontSize: 11 }}
           />
           <Tooltip
-            contentStyle={{
-              background: "rgba(255,255,255,0.95)",
-              border: "1px solid #e8e6e1",
-              borderRadius: "12px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.06)",
-              fontSize: "13px",
-            }}
+            contentStyle={chart.tooltip}
             formatter={(value: number, _name: string, props: any) => [
               `${value}分`,
               props?.payload?.fullName ?? "",
@@ -90,7 +89,7 @@ export function ComparisonBarChart({ rankings }: ComparisonBarChartProps) {
             <LabelList
               dataKey="score"
               position="right"
-              style={{ fill: "#5c574f", fontSize: 12, fontWeight: 600 }}
+              style={{ fill: chart.valueLabel, fontSize: 12, fontWeight: 600 }}
             />
           </Bar>
         </RechartsBarChart>

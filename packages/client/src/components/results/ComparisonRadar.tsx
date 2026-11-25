@@ -9,6 +9,8 @@ import {
   Legend,
 } from "recharts";
 import type { SchoolRanking } from "@/types/school";
+import { useIsDark } from "@/hooks/useTheme";
+import { getChartTheme } from "@/lib/chartTheme";
 
 /** 雷达图配色 */
 const RADAR_COLORS = [
@@ -24,6 +26,9 @@ interface ComparisonRadarProps {
 
 /** 多学校叠加雷达图 */
 export function ComparisonRadar({ rankings }: ComparisonRadarProps) {
+  const isDark = useIsDark();
+  const chart = getChartTheme(isDark);
+
   const dimensionKeys = [
     { key: "teachingStaffScore", label: "师资力量" },
     { key: "reputationScore", label: "用户口碑" },
@@ -55,25 +60,19 @@ export function ComparisonRadar({ rankings }: ComparisonRadarProps) {
       </h4>
       <ResponsiveContainer width="100%" height={360}>
         <RechartsRadarChart data={data} cx="50%" cy="50%" outerRadius="70%">
-          <PolarGrid stroke="#e8e6e1" strokeDasharray="3 3" />
+          <PolarGrid stroke={chart.grid} strokeDasharray="3 3" />
           <PolarAngleAxis
             dataKey="dimension"
-            tick={{ fill: "#7d7870", fontSize: 12 }}
+            tick={{ fill: chart.axisLabel, fontSize: 12 }}
           />
           <PolarRadiusAxis
             angle={90}
             domain={[0, 100]}
-            tick={{ fill: "#a8a49c", fontSize: 10 }}
+            tick={{ fill: chart.axisTick, fontSize: 10 }}
             tickCount={5}
           />
           <Tooltip
-            contentStyle={{
-              background: "rgba(255,255,255,0.95)",
-              border: "1px solid #e8e6e1",
-              borderRadius: "12px",
-              boxShadow: "0 4px 12px rgba(0,0,0,0.06)",
-              fontSize: "13px",
-            }}
+            contentStyle={chart.tooltip}
             formatter={(value: number, name: string) => [`${value}分`, name]}
           />
           {rankings.map((r, i) => {
